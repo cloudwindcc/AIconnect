@@ -1,0 +1,30 @@
+{
+  "companies": [
+    {
+      "name": "真实公司A",
+      "countryRegion": "中国大陆",
+      "industry": "新能源",
+      "mainBusiness": "储能系统",
+      "revenue": 800000000,
+      "employeeCount": 650,
+      "companyStage": "成长期",
+      "needs": ["中东客户", "香港上市", "融资"],
+      "resources": ["储能方案", "工程交付", "海外EPC"],
+      "painPoints": ["海外渠道不足", "资金需求明确"],
+      "confidenceScore": 90
+    }
+  ],
+  "advisors": [
+    {
+      "name": "顾问姓名",
+      "title": "资本市场顾问",
+      "organization": "机构名称",
+      "countryRegion": "香港",
+      "capabilities": ["香港上市", "融资", "金融机构"],
+      "industries": ["新能源", "医疗器械"],
+      "regions": ["中国大陆", "香港", "中东"],
+      "relationshipStrength": 85,
+      "cases": ["辅导企业港股上市", "连接投行资源"]
+    }
+  ]
+}

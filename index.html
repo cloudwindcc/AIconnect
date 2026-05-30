@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AIConnect 机会图谱 Demo</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>AIConnect 机会图谱 Demo</h1>
+          <p>50 家公司、5 位顾问、AI 机会匹配、数据表和录入入口</p>
+        </div>
+        <div class="topbar-right">
+          <div class="role-switch" aria-label="访问权限">
+            <span>权限</span>
+            <button id="viewerModeButton" class="role-button" type="button">访客</button>
+            <button id="adminModeButton" class="role-button active" type="button">管理员</button>
+          </div>
+          <button id="openAdminButton" class="admin-link" type="button" data-admin-only>后台配置</button>
+          <div class="stat-strip" aria-label="核心统计">
+            <div class="stat">
+              <span id="companyCount">50</span>
+              <small>公司节点</small>
+            </div>
+            <div class="stat">
+              <span id="advisorCount">5</span>
+              <small>顾问节点</small>
+            </div>
+            <div class="stat">
+              <span id="opportunityCount">0</span>
+              <small>机会连线</small>
+            </div>
+            <div class="stat">
+              <span id="expectedTotal">0</span>
+              <small>机会点</small>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div id="mainView">
+        <main class="workspace">
+          <section class="graph-stage" aria-label="关系图谱">
+          <div class="toolbar">
+            <label class="search-field">
+              <span>搜索</span>
+              <input id="searchInput" type="search" placeholder="公司、顾问、行业、地区" />
+            </label>
+            <label>
+              <span>地区</span>
+              <select id="regionFilter"></select>
+            </label>
+            <label>
+              <span>机会类型</span>
+              <select id="typeFilter"></select>
+            </label>
+            <label>
+              <span>最低期望值</span>
+              <select id="valueFilter">
+                <option value="0">全部</option>
+                <option value="1000000">100 万+</option>
+                <option value="5000000">500 万+</option>
+                <option value="10000000">1000 万+</option>
+                <option value="30000000">3000 万+</option>
+              </select>
+            </label>
+            <div class="toggle-group" aria-label="连线状态筛选">
+              <button id="showPotential" class="toggle active" type="button">潜在</button>
+              <button id="showActive" class="toggle active" type="button">进行中</button>
+            </div>
+            <button id="resetView" class="icon-button" type="button" title="重置视图">↺</button>
+          </div>
+
+          <div class="graph-wrap">
+            <canvas id="graphCanvas" aria-label="公司和顾问关系网络"></canvas>
+            <div id="tooltip" class="tooltip" hidden></div>
+            <div class="legend">
+              <strong>图例</strong>
+              <div class="legend-row"><span class="line-sample solid"></span>合作进行中</div>
+              <div class="legend-row"><span class="line-sample dashed"></span>潜在合作机会</div>
+              <div id="regionLegend" class="region-legend"></div>
+            </div>
+          </div>
+          </section>
+
+          <aside class="side-panel" aria-label="详情和操作">
+          <section class="panel-section selected-card">
+            <div class="section-title">
+              <h2>节点 / 机会详情</h2>
+              <span id="selectionBadge">未选择</span>
+            </div>
+            <div id="detailPanel" class="detail-empty">
+              点击图谱节点或连线查看详情。
+            </div>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-title">
+              <h2>高价值机会</h2>
+              <span>Top 5</span>
+            </div>
+            <div id="topList" class="top-list"></div>
+          </section>
+          </aside>
+        </main>
+
+        <section class="data-zone" aria-label="数据管理">
+        <div class="tabs" role="tablist">
+          <button class="tab active" data-tab="opportunities" type="button">机会池</button>
+          <button class="tab" data-tab="companies" type="button">公司数据库</button>
+          <button class="tab" data-tab="advisors" type="button">顾问数据库</button>
+        </div>
+        <section class="opportunity-entry" aria-label="AI录入机会" data-admin-only>
+          <div class="entry-head">
+            <div>
+              <h2>AI 录入</h2>
+              <span>录入新线索后自动加入机会池</span>
+            </div>
+            <div class="entry-actions">
+              <button id="voiceButton" type="button">语音</button>
+              <button id="sampleButton" type="button">换个样例</button>
+              <button id="parseButton" class="primary" type="button">解析并匹配</button>
+            </div>
+          </div>
+          <textarea id="aiInput" rows="3">今天见了一家深圳新能源公司，年收入大概8亿，想找中东客户，也考虑香港上市。</textarea>
+          <div id="aiResult" class="ai-result"></div>
+        </section>
+        <div class="table-tools">
+          <span id="tableSummary">机会池</span>
+          <div class="data-actions" data-admin-only>
+            <button id="addCompanyButton" type="button">新增公司</button>
+            <button id="addAdvisorButton" type="button">新增顾问</button>
+            <button id="importExcelButton" type="button">导入 Excel</button>
+            <button id="exportExcelButton" type="button">导出 Excel</button>
+            <button id="importButton" type="button">导入 JSON</button>
+            <button id="saveLocalButton" type="button">保存本地</button>
+            <button id="resetDataButton" type="button">重置模拟</button>
+            <button id="exportButton" type="button">导出 JSON</button>
+          </div>
+          <input id="importFile" type="file" accept="application/json,.json" hidden />
+          <input id="importExcelFile" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden />
+        </div>
+        <div class="table-wrap">
+          <table id="dataTable"></table>
+        </div>
+        </section>
+      </div>
+
+      <section id="adminView" class="admin-zone" aria-label="匹配规则和AI配置管理后台" hidden>
+        <div class="admin-head">
+          <div>
+            <span>Admin Console</span>
+            <h2>规则引擎与 AI 配置后台</h2>
+          </div>
+          <div class="admin-actions">
+            <button id="backToMainButton" type="button">返回图谱</button>
+            <button id="saveAdminConfig" class="primary" type="button">保存配置并重算</button>
+            <button id="resetAdminConfig" type="button">恢复默认</button>
+          </div>
+        </div>
+        <div class="admin-grid">
+          <div class="admin-card">
+            <h3>规则引擎权重</h3>
+            <div class="config-grid">
+              <label><span>需求资源匹配</span><input id="needWeight" type="number" step="0.1" min="0" /></label>
+              <label><span>同业协同</span><input id="industryWeight" type="number" step="0.1" min="0" /></label>
+              <label><span>跨区域机会</span><input id="regionWeight" type="number" step="0.1" min="0" /></label>
+              <label><span>规模承接关系</span><input id="scaleWeight" type="number" step="0.1" min="0" /></label>
+              <label><span>顾问影响力</span><input id="advisorWeight" type="number" step="0.1" min="0" /></label>
+              <label><span>强匹配阈值</span><input id="strongMatchThreshold" type="number" step="0.1" min="0" /></label>
+            </div>
+          </div>
+          <div class="admin-card">
+            <h3>模型 API 配置</h3>
+            <div class="config-grid">
+              <label class="checkbox-label"><span>启用真实AI分析</span><input id="aiEnabled" type="checkbox" /></label>
+              <label><span>Provider</span><input id="apiProvider" placeholder="OpenAI / Cloudflare AI / 自定义" /></label>
+              <label><span>Base URL / Proxy</span><input id="apiBaseUrl" placeholder="/api/analyze-opportunities 或 https://api.openai.com/v1" /></label>
+              <label><span>Model</span><input id="apiModel" placeholder="gpt-4.1-mini" /></label>
+              <label><span>API Key</span><input id="apiKey" type="password" placeholder="直连测试才填写，生产放后端密钥" /></label>
+            </div>
+            <p class="admin-note">默认调用同源 /api/analyze-opportunities 后端代理；API Key 只保存在当前浏览器会话，生产环境应使用后端密钥。</p>
+          </div>
+          <div class="admin-card prompt-card">
+            <h3>智能匹配提示词</h3>
+            <textarea id="matchPrompt" rows="12"></textarea>
+          </div>
+          <div class="admin-card prompt-card">
+            <h3>提示词预览</h3>
+            <pre id="promptPreview"></pre>
+          </div>
+        </div>
+      </section>
+
+      <section class="theory-zone" aria-label="理论与技术基础">
+        <div class="theory-head">
+          <span>Methodology</span>
+          <h2>理论与技术基础</h2>
+          <p>
+            AIConnect 将企业、顾问、资源、需求和交易机会建模为动态商业网络，用可计算的方式识别价值连接、降低交易摩擦，并形成可追溯的机会发现机制。
+          </p>
+        </div>
+        <div class="theory-grid">
+          <article>
+            <h3>复杂网络理论</h3>
+            <p>以节点、边、中心度、社群结构和路径长度刻画企业间资源流动，识别关键连接者、结构洞和高价值撮合路径。</p>
+          </article>
+          <article>
+            <h3>营销定位与影响理论</h3>
+            <p>将企业能力、市场位置和顾问影响力转化为标签与权重，评估谁能影响谁、何种资源能促成需求转化。</p>
+          </article>
+          <article>
+            <h3>交易成本经济学</h3>
+            <p>围绕搜寻成本、信任成本、谈判成本和履约成本建立机会评分，优先推荐能显著降低交易摩擦的合作组合。</p>
+          </article>
+          <article>
+            <h3>经济增加值模型</h3>
+            <p>用机会规模、成交概率、可信度和战略价值计算期望收益，帮助管理者把注意力集中在更高经济创造值的机会。</p>
+          </article>
+          <article>
+            <h3>AI 语义匹配</h3>
+            <p>通过自然语言理解、行业标签、需求抽取和语义相似度分析，把非结构化线索转化为可计算的潜在合作关系。</p>
+          </article>
+          <article>
+            <h3>区块链信任机制</h3>
+            <p>未来可将机会来源、顾问贡献、关键承诺和交易里程碑上链存证，形成可验证、可追溯、可分配的协作信任基础。</p>
+          </article>
+        </div>
+      </section>
+    </div>
+
+    <div id="editModal" class="edit-modal" hidden>
+      <div class="edit-dialog" role="dialog" aria-modal="true" aria-labelledby="editTitle">
+        <div class="edit-head">
+          <h2 id="editTitle">编辑数据</h2>
+          <button id="closeEditButton" class="icon-button" type="button" title="关闭">×</button>
+        </div>
+        <form id="editForm" class="edit-form"></form>
+      </div>
+    </div>
+
+    <div id="opportunityContextMenu" class="context-menu" hidden>
+      <button id="analyzeOpportunityButton" type="button">分析项目机会</button>
+    </div>
+
+    <div id="loginModal" class="login-modal" hidden>
+      <form id="loginForm" class="login-dialog" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+        <div class="login-head">
+          <h2 id="loginTitle">管理员登录</h2>
+          <button id="closeLoginButton" class="icon-button" type="button" title="关闭">×</button>
+        </div>
+        <label>
+          <span>用户名</span>
+          <input id="adminUsername" autocomplete="username" required />
+        </label>
+        <label>
+          <span>密码</span>
+          <input id="adminPassword" type="password" autocomplete="current-password" required />
+        </label>
+        <div id="loginError" class="login-error"></div>
+        <div class="login-actions">
+          <button type="button" id="cancelLoginButton">取消</button>
+          <button class="primary" type="submit">登录</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="reportModal" class="report-modal" hidden>
+      <div class="report-dialog" role="dialog" aria-modal="true" aria-labelledby="reportTitle">
+        <div class="report-head">
+          <div>
+            <h2 id="reportTitle">项目机会分析报告</h2>
+            <span id="reportMeta"></span>
+          </div>
+          <button id="closeReportButton" class="icon-button" type="button" title="关闭">×</button>
+        </div>
+        <div id="reportBody" class="report-body"></div>
+        <div class="report-actions">
+          <button id="saveReportButton" type="button">保存本地</button>
+          <button id="downloadReportButton" class="primary" type="button">下载 Word</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
+    <script src="./app.js" defer></script>
+  </body>
+</html>
