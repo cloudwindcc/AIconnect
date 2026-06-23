@@ -5,4 +5,4 @@ compatibility_date = "2026-06-21"
 [[d1_databases]]
 binding = "DB"
 database_name = "3hk-hub"
-database_id = "replace-with-cloudflare-d1-database-id"
+database_id = "2f0f55b3-e222-4fc0-934d-c98ac84c57c7"
