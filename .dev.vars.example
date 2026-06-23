@@ -1,3 +1,5 @@
 OPENAI_API_KEY=sk-your-api-key
 OPENAI_MODEL=gpt-4.1-mini
 OPENAI_BASE_URL=https://api.openai.com/v1
+ADMIN_EMAILS=admin@3hk.xyz
+DEV_ADMIN=true

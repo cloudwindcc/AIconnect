@@ -1,3 +1,14 @@
+import {
+  getSession,
+  loadConfig as fetchRemoteConfig,
+  loadDataset,
+  registerVisitor,
+  saveConfig as persistRemoteConfig,
+  saveDataset,
+} from "./api/client.js";
+import { applyNetworkMetrics, linkWidth as scaledLinkWidth } from "./domain/metrics.js";
+import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.js";
+
 (() => {
   const REGIONS = [
     { name: "中国大陆", color: "#2f80ed" },
@@ -56,6 +67,22 @@
   };
 
   const WORLD_GEOJSON_URL = "https://cdn.jsdelivr.net/gh/holtzy/D3-graph-gallery@master/DATA/world.geojson";
+  const LOCAL_VISITOR_KEY = "3hk-hub-visitor-session";
+  const SIMPLE_NODE_HIT_RADIUS = 13;
+
+  const NODE_CLUSTER_COLORS = {
+    中国大陆: "#178a2f",
+    香港: "#d9234f",
+    菲律宾: "#204bd8",
+    新加坡: "#21a96b",
+    美国: "#e02424",
+    欧洲: "#7c3aed",
+    中东: "#d0b321",
+    东南亚: "#36b86f",
+    日本: "#2563eb",
+    韩国: "#00a7a7",
+    advisor: "#111827",
+  };
 
   const MAP_LAND_SHAPES = [
     [
@@ -90,18 +117,6 @@
     "投资并购",
     "渠道出海",
   ];
-
-  const TYPE_COLORS = {
-    采购: "#0f7c80",
-    供应链: "#2f80ed",
-    融资: "#9b51e0",
-    香港上市: "#344054",
-    技术合作: "#00a37a",
-    客户拓展: "#eb5757",
-    投资并购: "#b7791f",
-    渠道出海: "#f2994a",
-    顾问资源: "#667085",
-  };
 
   const INDUSTRIES = {
     新能源: {
@@ -248,12 +263,7 @@
     model: "gpt-4.1-mini",
     apiKey: "",
     prompt:
-      "你是一个产业合作机会分析引擎。请基于公司画像、顾问能力、行业、地区、需求、资源和历史证据，输出结构化JSON。必须包含：opportunities数组；每项包含candidate_id、opportunity_type、recommended_advisor、estimated_value、probability、confidence、expected_value、evidence、risk_factors、summary、next_step。判断依据包括复杂网络位置、需求资源匹配、交易成本降低、经济增加值和信任可验证性。",
-  };
-
-  const DEFAULT_ADMIN_CREDENTIALS = {
-    username: "admin",
-    password: "admin2026",
+      "你是 3HK Hub 的产业机会网络分析引擎。请基于公司画像、顾问能力、行业、地区、需求、资源、Hub Score、Bridge Path、Trust Edge 和历史证据，输出结构化JSON。必须包含：opportunities数组；每项包含candidate_id、opportunity_type、recommended_advisor、estimated_value、probability、confidence、expected_value、evidence、risk_factors、summary、next_step。不要新增不存在的candidate_id。",
   };
 
   const els = {
@@ -276,6 +286,7 @@
     topList: document.getElementById("topList"),
     viewerModeButton: document.getElementById("viewerModeButton"),
     adminModeButton: document.getElementById("adminModeButton"),
+    visitorRegisterButton: document.getElementById("visitorRegisterButton"),
     aiInput: document.getElementById("aiInput"),
     parseButton: document.getElementById("parseButton"),
     sampleButton: document.getElementById("sampleButton"),
@@ -318,6 +329,9 @@
     promptPreview: document.getElementById("promptPreview"),
     opportunityContextMenu: document.getElementById("opportunityContextMenu"),
     analyzeOpportunityButton: document.getElementById("analyzeOpportunityButton"),
+    openProductGuideButton: document.getElementById("openProductGuideButton"),
+    productGuideModal: document.getElementById("productGuideModal"),
+    closeProductGuideButton: document.getElementById("closeProductGuideButton"),
     loginModal: document.getElementById("loginModal"),
     loginForm: document.getElementById("loginForm"),
     closeLoginButton: document.getElementById("closeLoginButton"),
@@ -325,6 +339,15 @@
     adminUsername: document.getElementById("adminUsername"),
     adminPassword: document.getElementById("adminPassword"),
     loginError: document.getElementById("loginError"),
+    visitorModal: document.getElementById("visitorModal"),
+    visitorForm: document.getElementById("visitorForm"),
+    closeVisitorButton: document.getElementById("closeVisitorButton"),
+    cancelVisitorButton: document.getElementById("cancelVisitorButton"),
+    visitorEmail: document.getElementById("visitorEmail"),
+    visitorName: document.getElementById("visitorName"),
+    visitorOrganization: document.getElementById("visitorOrganization"),
+    visitorInterest: document.getElementById("visitorInterest"),
+    visitorError: document.getElementById("visitorError"),
     reportModal: document.getElementById("reportModal"),
     reportTitle: document.getElementById("reportTitle"),
     reportMeta: document.getElementById("reportMeta"),
@@ -355,7 +378,8 @@
     },
     ruleConfig: structuredClone(DEFAULT_RULE_CONFIG),
     aiConfig: structuredClone(DEFAULT_AI_CONFIG),
-    accessRole: sessionStorage.getItem("aiconnect-admin-authenticated") === "true" ? "admin" : "viewer",
+    accessRole: "viewer",
+    session: { authenticated: false, admin: false, email: null, visitor: null },
     activeTab: "opportunities",
     editing: null,
     hover: null,
@@ -378,9 +402,10 @@
 
   init();
 
-  function init() {
-    loadAdminConfig();
-    const saved = loadSavedData();
+  async function init() {
+    await refreshSession();
+    await loadAdminConfig();
+    const saved = await loadSavedData();
     if (saved) {
       state.companies = saved.companies;
       state.advisors = saved.advisors;
@@ -406,6 +431,90 @@
     applyAccessControl();
     loadWorldMap();
     requestAnimationFrame(frame);
+  }
+
+  async function refreshSession() {
+    const remoteSession = await getSession();
+    const localVisitor = loadLocalVisitorSession();
+    state.session = shouldUseLocalVisitor(remoteSession, localVisitor) ? localVisitor : normalizeSession(remoteSession);
+    state.accessRole = state.session.admin ? "admin" : "viewer";
+  }
+
+  function shouldUseLocalVisitor(remoteSession, localVisitor) {
+    if (!localVisitor) return false;
+    if (!remoteSession?.authenticated) return true;
+    return !remoteSession.admin && !remoteSession.visitor && remoteSession.authProvider === "public-viewer";
+  }
+
+  function normalizeSession(session = {}) {
+    return {
+      authenticated: Boolean(session.authenticated),
+      admin: Boolean(session.admin),
+      email: session.email || session.visitor?.email || null,
+      visitor: session.visitor || null,
+      authProvider: session.authProvider || "public-viewer",
+    };
+  }
+
+  function loadLocalVisitorSession() {
+    try {
+      const raw = localStorage.getItem(LOCAL_VISITOR_KEY);
+      if (!raw) return null;
+      const visitor = JSON.parse(raw);
+      if (!visitor?.email || !isValidEmail(visitor.email)) return null;
+      return normalizeSession({
+        authenticated: true,
+        admin: false,
+        email: visitor.email,
+        visitor,
+        authProvider: "local-visitor",
+      });
+    } catch (error) {
+      console.warn("Failed to load local visitor session", error);
+      return null;
+    }
+  }
+
+  function normalizeVisitorPayload(payload) {
+    const email = String(payload.email || "").trim().toLowerCase();
+    if (!isValidEmail(email)) return null;
+    return {
+      email,
+      name: compactText(payload.name, 80),
+      organization: compactText(payload.organization, 120),
+      interest: compactText(payload.interest, 160),
+    };
+  }
+
+  function createLocalVisitorSession(visitor) {
+    const profile = {
+      id: `local-visitor-${Date.now()}`,
+      email: visitor.email,
+      name: visitor.name,
+      organization: visitor.organization,
+      interest: visitor.interest,
+      registeredAt: new Date().toISOString(),
+    };
+    try {
+      localStorage.setItem(LOCAL_VISITOR_KEY, JSON.stringify(profile));
+    } catch (error) {
+      console.warn("Failed to store local visitor session", error);
+    }
+    return normalizeSession({
+      authenticated: true,
+      admin: false,
+      email: profile.email,
+      visitor: profile,
+      authProvider: "local-visitor",
+    });
+  }
+
+  function isValidEmail(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+  }
+
+  function compactText(value, maxLength) {
+    return String(value || "").trim().replace(/\s+/g, " ").slice(0, maxLength);
   }
 
   async function loadWorldMap() {
@@ -528,7 +637,7 @@
         createdAt: "2026-05-09",
         isNew: false,
       };
-      company.radius = companyRadius(company.revenue);
+      company.radius = graphNodeRadius(company);
       companies.push(company);
     }
 
@@ -556,10 +665,6 @@
       金融科技: ["合规要求高", "金融机构触达难", "数据安全压力"],
     };
     return [...sample(base[industry], 2), ...needs.slice(0, 1).map((need) => `${need}资源不足`)];
-  }
-
-  function companyRadius(revenue) {
-    return 10;
   }
 
   function generateOpportunities(companies, advisors, count) {
@@ -766,6 +871,7 @@
   }
 
   function rebuildGraph() {
+    applyNetworkMetrics(state);
     state.nodes = [...state.companies, ...state.advisors];
     state.nodeById = new Map(state.nodes.map((node) => [node.id, node]));
     state.opportunityById = new Map(state.opportunities.map((item) => [item.id, item]));
@@ -797,10 +903,8 @@
   }
 
   function renderRegionLegend() {
-    els.regionLegend.innerHTML = REGIONS.map(
-      (region) =>
-        `<div class="region-pill"><span class="dot" style="background:${region.color}"></span><span>${region.name}</span></div>`,
-    ).join("");
+    els.regionLegend.innerHTML = "";
+    els.regionLegend.hidden = true;
   }
 
   function bindEvents() {
@@ -830,6 +934,7 @@
     els.resetView.addEventListener("click", resetView);
     els.viewerModeButton.addEventListener("click", () => setAccessRole("viewer"));
     els.adminModeButton.addEventListener("click", requestAdminLogin);
+    els.visitorRegisterButton.addEventListener("click", openVisitorModal);
 
     if (window.PointerEvent) {
       els.canvas.addEventListener("pointerdown", onPointerDown);
@@ -851,6 +956,8 @@
       if (event.key === "Escape") {
         hideOpportunityContextMenu();
         closeReportModal();
+        closeVisitorModal();
+        closeProductGuideModal();
       }
     });
 
@@ -886,6 +993,11 @@
     els.resetDataButton.addEventListener("click", resetDemoData);
     els.exportButton.addEventListener("click", exportJson);
     els.analyzeOpportunityButton.addEventListener("click", analyzeContextOpportunity);
+    els.openProductGuideButton.addEventListener("click", openProductGuideModal);
+    els.closeProductGuideButton.addEventListener("click", closeProductGuideModal);
+    els.productGuideModal.addEventListener("click", (event) => {
+      if (event.target === els.productGuideModal) closeProductGuideModal();
+    });
     els.closeReportButton.addEventListener("click", closeReportModal);
     els.reportModal.addEventListener("click", (event) => {
       if (event.target === els.reportModal) closeReportModal();
@@ -897,6 +1009,12 @@
     els.cancelLoginButton.addEventListener("click", closeLoginModal);
     els.loginModal.addEventListener("click", (event) => {
       if (event.target === els.loginModal) closeLoginModal();
+    });
+    els.visitorForm.addEventListener("submit", handleVisitorRegister);
+    els.closeVisitorButton.addEventListener("click", closeVisitorModal);
+    els.cancelVisitorButton.addEventListener("click", closeVisitorModal);
+    els.visitorModal.addEventListener("click", (event) => {
+      if (event.target === els.visitorModal) closeVisitorModal();
     });
     els.closeEditButton.addEventListener("click", closeEditor);
     els.editModal.addEventListener("click", (event) => {
@@ -945,10 +1063,7 @@
   }
 
   function setAccessRole(role) {
-    state.accessRole = role === "admin" ? "admin" : "viewer";
-    if (state.accessRole === "viewer") {
-      sessionStorage.removeItem("aiconnect-admin-authenticated");
-    }
+    state.accessRole = role === "admin" && state.session.admin ? "admin" : "viewer";
     if (!isAdmin() && window.location.hash.replace("#", "") === "admin") {
       window.location.hash = "";
     }
@@ -957,7 +1072,7 @@
   }
 
   function isAdmin() {
-    return state.accessRole === "admin" && sessionStorage.getItem("aiconnect-admin-authenticated") === "true";
+    return state.accessRole === "admin" && state.session.admin === true;
   }
 
   function requireAdmin() {
@@ -968,9 +1083,14 @@
 
   function applyAccessControl() {
     const admin = isAdmin();
+    const visitor = !admin && Boolean(state.session.visitor);
     els.viewerModeButton.classList.toggle("active", !admin);
     els.adminModeButton.classList.toggle("active", admin);
+    els.viewerModeButton.textContent = visitor ? "访客已登录" : "访客";
     els.adminModeButton.textContent = admin ? "管理员已登录" : "管理员";
+    els.visitorRegisterButton.textContent = visitor ? "访客资料" : "访客注册";
+    els.visitorRegisterButton.classList.toggle("active", visitor);
+    els.visitorRegisterButton.title = visitor ? `当前访客：${state.session.email}` : "使用邮箱注册访客身份";
     document.querySelectorAll("[data-admin-only]").forEach((element) => {
       element.hidden = !admin;
     });
@@ -986,10 +1106,10 @@
 
   function openLoginModal() {
     els.loginError.textContent = "";
-    els.adminUsername.value = "";
-    els.adminPassword.value = "";
+    els.loginError.textContent = "未检测到 Cloudflare Access 管理员身份。请先通过 hub.3hk.xyz 的 Access 策略登录。";
+    if (els.adminUsername) els.adminUsername.value = "";
+    if (els.adminPassword) els.adminPassword.value = "";
     els.loginModal.hidden = false;
-    window.setTimeout(() => els.adminUsername.focus(), 0);
   }
 
   function closeLoginModal() {
@@ -997,21 +1117,88 @@
     els.loginError.textContent = "";
   }
 
-  function handleAdminLogin(event) {
+  async function handleAdminLogin(event) {
     event.preventDefault();
-    const username = els.adminUsername.value.trim();
-    const password = els.adminPassword.value;
-    if (username === DEFAULT_ADMIN_CREDENTIALS.username && password === DEFAULT_ADMIN_CREDENTIALS.password) {
-      sessionStorage.setItem("aiconnect-admin-authenticated", "true");
+    await refreshSession();
+    if (state.session.admin) {
       state.accessRole = "admin";
       closeLoginModal();
       applyAccessControl();
       renderTable();
-      flashTableSummary("管理员登录成功");
+      flashTableSummary("Cloudflare Access 管理员身份已确认");
       return;
     }
-    els.loginError.textContent = "用户名或密码错误";
-    els.adminPassword.select();
+    els.loginError.textContent = "仍未检测到管理员身份。请检查 Cloudflare Access 策略或 ADMIN_EMAILS 配置。";
+  }
+
+  function openProductGuideModal() {
+    els.productGuideModal.hidden = false;
+    window.setTimeout(() => els.closeProductGuideButton.focus(), 0);
+  }
+
+  function closeProductGuideModal() {
+    els.productGuideModal.hidden = true;
+  }
+
+  function openVisitorModal() {
+    const visitor = state.session.visitor || {};
+    els.visitorEmail.value = visitor.email || state.session.email || "";
+    els.visitorName.value = visitor.name || "";
+    els.visitorOrganization.value = visitor.organization || "";
+    els.visitorInterest.value = visitor.interest || "";
+    els.visitorError.textContent = "";
+    els.visitorModal.hidden = false;
+    window.setTimeout(() => els.visitorEmail.focus(), 0);
+  }
+
+  function closeVisitorModal() {
+    els.visitorModal.hidden = true;
+    els.visitorError.textContent = "";
+  }
+
+  async function handleVisitorRegister(event) {
+    event.preventDefault();
+    const payload = {
+      email: els.visitorEmail.value,
+      name: els.visitorName.value,
+      organization: els.visitorOrganization.value,
+      interest: els.visitorInterest.value,
+    };
+    const normalized = normalizeVisitorPayload(payload);
+    if (!normalized) {
+      els.visitorError.textContent = "请输入有效邮箱。";
+      return;
+    }
+
+    const submitButton = els.visitorForm.querySelector('button[type="submit"]');
+    submitButton.disabled = true;
+    els.visitorError.textContent = "正在注册...";
+    try {
+      const remoteSession = await registerVisitor(normalized);
+      state.session = normalizeSession(remoteSession);
+      localStorage.removeItem(LOCAL_VISITOR_KEY);
+      flashTableSummary("访客注册成功，已自动登录");
+    } catch (error) {
+      if (!isLocalApiFallback(error)) {
+        els.visitorError.textContent = error.message || "注册失败，请稍后重试。";
+        return;
+      }
+      console.warn("Visitor registration API unavailable, using local visitor session", error);
+      state.session = createLocalVisitorSession(normalized);
+      flashTableSummary("访客注册成功，已在本地自动登录");
+    } finally {
+      submitButton.disabled = false;
+    }
+    state.accessRole = "viewer";
+    closeVisitorModal();
+    applyAccessControl();
+    renderTable();
+  }
+
+  function isLocalApiFallback(error) {
+    const message = String(error?.message || "");
+    const localHost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+    return message.includes("API response was not JSON") || message.includes("Failed to fetch") || (localHost && message.includes("404"));
   }
 
   function renderRoute() {
@@ -1077,7 +1264,7 @@
       node.vx = 0;
       node.vy = 0;
       node.anchor = anchor;
-      node.radius = node.type === "advisor" ? 13 : companyRadius(node.revenue);
+      node.radius = graphNodeRadius(node);
     });
 
     for (let i = 0; i < 280; i += 1) {
@@ -1115,17 +1302,28 @@
   }
 
   function mapBounds() {
-    const width = state.width * 0.9;
-    const height = state.height * 0.74;
+    const lonMin = -180;
+    const lonMax = 180;
+    const latMin = -60;
+    const latMax = 83;
+    const availableWidth = state.width * 0.92;
+    const availableHeight = state.height * 0.62;
+    const aspect = (lonMax - lonMin) / (latMax - latMin);
+    let width = availableWidth;
+    let height = width / aspect;
+    if (height > availableHeight) {
+      height = availableHeight;
+      width = height * aspect;
+    }
     return {
       x: (state.width - width) / 2,
-      y: state.height * 0.12,
+      y: state.height * 0.16,
       width,
       height,
-      lonMin: -180,
-      lonMax: 180,
-      latMin: -60,
-      latMax: 83,
+      lonMin,
+      lonMax,
+      latMin,
+      latMax,
     };
   }
 
@@ -1133,10 +1331,7 @@
     const bounds = mapBounds();
     const x = bounds.x + ((lon - bounds.lonMin) / (bounds.lonMax - bounds.lonMin)) * bounds.width;
     const y = bounds.y + ((bounds.latMax - lat) / (bounds.latMax - bounds.latMin)) * bounds.height;
-    return {
-      x: clamp(x, 70, state.width - 70),
-      y: clamp(y, 70, state.height - 70),
-    };
+    return { x, y };
   }
 
   function resetView() {
@@ -1247,10 +1442,10 @@
   function drawMapBackground() {
     const bounds = mapBounds();
     ctx.save();
-    ctx.globalAlpha = 0.58;
+    ctx.globalAlpha = 1;
 
-    ctx.strokeStyle = "rgba(103, 232, 249, 0.11)";
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(148, 163, 184, 0.16)";
+    ctx.lineWidth = 0.6;
     for (let lon = -120; lon <= 120; lon += 60) {
       const top = projectGeo(lon, bounds.latMax);
       const bottom = projectGeo(lon, bounds.latMin);
@@ -1283,9 +1478,9 @@
       const point = projectGeo(coord.lon, coord.lat);
       ctx.beginPath();
       ctx.arc(point.x, point.y, 3.2, 0, Math.PI * 2);
-      ctx.fillStyle = withAlpha(region.color, 0.72);
+      ctx.fillStyle = "rgba(100, 116, 139, 0.35)";
       ctx.fill();
-      ctx.fillStyle = "rgba(216, 245, 252, 0.52)";
+      ctx.fillStyle = "rgba(71, 85, 105, 0.52)";
       ctx.fillText(region.name, point.x, point.y - 13);
     });
 
@@ -1294,9 +1489,9 @@
       const point = projectGeo(coord.lon, coord.lat);
       ctx.beginPath();
       ctx.arc(point.x, point.y, 2, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(216, 245, 252, 0.42)";
+      ctx.fillStyle = "rgba(100, 116, 139, 0.26)";
       ctx.fill();
-      ctx.fillStyle = "rgba(216, 245, 252, 0.42)";
+      ctx.fillStyle = "rgba(71, 85, 105, 0.38)";
       ctx.fillText(city, point.x, point.y + 10);
     });
 
@@ -1304,9 +1499,9 @@
   }
 
   function drawGeoJsonMap() {
-    ctx.fillStyle = "rgba(70, 125, 142, 0.19)";
-    ctx.strokeStyle = "rgba(103, 232, 249, 0.2)";
-    ctx.lineWidth = 0.85;
+    ctx.fillStyle = "rgba(226, 232, 240, 0.42)";
+    ctx.strokeStyle = "rgba(148, 163, 184, 0.34)";
+    ctx.lineWidth = 0.55;
 
     state.worldMapFeatures.forEach((feature) => {
       const geometry = feature.geometry;
@@ -1344,10 +1539,10 @@
         else ctx.lineTo(point.x, point.y);
       });
       ctx.closePath();
-      ctx.fillStyle = "rgba(70, 125, 142, 0.2)";
+      ctx.fillStyle = "rgba(226, 232, 240, 0.42)";
       ctx.fill();
-      ctx.strokeStyle = "rgba(103, 232, 249, 0.18)";
-      ctx.lineWidth = 1.1;
+      ctx.strokeStyle = "rgba(148, 163, 184, 0.34)";
+      ctx.lineWidth = 0.55;
       ctx.stroke();
     });
   }
@@ -1359,22 +1554,16 @@
       const isSelected = state.selection?.type === "opportunity" && state.selection.id === link.id;
       const isHover = state.hover?.type === "link" && state.hover.id === link.id;
 
-      ctx.beginPath();
-      ctx.moveTo(link.source.x, link.source.y);
-      ctx.lineTo(link.target.x, link.target.y);
-
       if (link.type === "advisor") {
-        ctx.setLineDash([2, 5]);
-        ctx.lineWidth = isHover ? 2.4 : 1.1 + link.strength;
-        ctx.strokeStyle = withAlpha(TYPE_COLORS.顾问资源, isHover ? 0.65 : 0.27);
+        ctx.setLineDash([]);
+        ctx.lineWidth = isHover ? 1.1 : 0.45;
+        ctx.strokeStyle = isHover ? "rgba(51, 65, 85, 0.46)" : "rgba(100, 116, 139, 0.16)";
       } else {
-        ctx.setLineDash(opportunity.status === "potential" ? [8, 7] : []);
-        ctx.lineWidth = (isSelected || isHover ? 1.6 : 1) * linkWidth(opportunity.estimatedValue);
-        ctx.strokeStyle = withAlpha(
-          TYPE_COLORS[opportunity.opportunityType] ?? "#5f6f89",
-          isSelected || isHover ? 0.92 : clamp(0.25 + opportunity.probability * 0.62, 0.28, 0.78),
-        );
+        ctx.setLineDash(opportunity.status === "potential" ? [4, 5] : []);
+        ctx.lineWidth = graphLinkWidth(opportunity, isSelected || isHover);
+        ctx.strokeStyle = isSelected || isHover ? "rgba(15, 23, 42, 0.5)" : "rgba(71, 85, 105, 0.18)";
       }
+      drawCurvedLink(link);
       ctx.stroke();
       ctx.setLineDash([]);
     }
@@ -1388,33 +1577,14 @@
       const isSelected = state.selection?.id === node.id;
       const isHover = state.hover?.type === "node" && state.hover.id === node.id;
       const isQueryHit = query && matchesQuery(node, query);
-      const color = node.type === "advisor" ? "#111d2e" : regionColor(node.countryRegion);
-      const stroke = node.type === "advisor" ? "#66e3ff" : "#d7fbff";
 
       ctx.save();
-      if (node.type === "advisor") {
-        drawRoundRect(node.x - node.radius, node.y - node.radius, node.radius * 2, node.radius * 2, 7);
-        ctx.fillStyle = color;
-        ctx.fill();
-        ctx.lineWidth = isSelected || isHover ? 3 : 2;
-        ctx.strokeStyle = isSelected || isHover ? "#0f7c80" : stroke;
-        ctx.stroke();
-        ctx.fillStyle = "#e9fbff";
-        ctx.font = "700 12px Inter, sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(node.name.slice(0, 2), node.x, node.y + 0.5);
-      } else {
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
-        ctx.fillStyle = color;
-        ctx.fill();
-        ctx.lineWidth = isSelected || isHover ? 3.2 : node.isNew ? 3 : 1.8;
-        ctx.strokeStyle = isSelected || isHover ? "#d7fbff" : node.isNew ? "#f2994a" : stroke;
-        ctx.stroke();
-      }
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
+      ctx.fillStyle = nodeClusterColor(node, isSelected || isHover || isQueryHit);
+      ctx.fill();
 
-      if (isSelected || isHover || isQueryHit || node.type === "advisor" || node.revenue > 7000000000) {
+      if (isSelected || isHover || isQueryHit || node.type === "advisor" || isLabelNode(node)) {
         drawNodeLabel(node, isSelected || isHover);
       }
       ctx.restore();
@@ -1432,21 +1602,16 @@
   }
 
   function drawNodeLabel(node, strong) {
-    const label = node.type === "advisor" ? node.name : trimLabel(node.name, strong ? 16 : 9);
-    ctx.font = `${strong ? 700 : 600} 12px Inter, sans-serif`;
-    const width = ctx.measureText(label).width + 12;
-    const x = node.x - width / 2;
-    const y = node.y + node.radius + 8;
-    drawRoundRect(x, y, width, 22, 6);
-    ctx.fillStyle = strong ? "rgba(8,17,31,0.96)" : "rgba(8,17,31,0.82)";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(102,227,255,0.34)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.fillStyle = "#dffaff";
+    const label = node.type === "advisor" ? shortAdvisorName(node) : shortCompanyName(node, strong);
+    ctx.font = `${strong ? 700 : 500} ${strong ? 13 : 10}px Inter, Arial, sans-serif`;
+    const y = node.y + node.radius + (strong ? 10 : 7);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(label, node.x, y + 11);
+    ctx.lineWidth = strong ? 4 : 3;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.86)";
+    ctx.strokeText(label, node.x, y);
+    ctx.fillStyle = strong ? "#111827" : "rgba(15, 23, 42, 0.78)";
+    ctx.fillText(label, node.x, y);
   }
 
   function getVisibleNodeSet() {
@@ -1524,12 +1689,52 @@
     return link.type === "opportunity" ? state.opportunityById.get(link.opportunityId ?? link.id) : null;
   }
 
-  function regionColor(regionName) {
-    return REGIONS.find((region) => region.name === regionName)?.color ?? "#667085";
+  function graphNodeRadius(node) {
+    if (node.type === "advisor") {
+      return clamp(5.2 + (Number(node.relationshipStrength) || 0) / 55, 5.4, 7.4);
+    }
+    const hub = Math.max(0, Number(node.hubScore) || 0);
+    const degree = Math.max(0, Number(node.degree) || 0);
+    return clamp(3.1 + Math.sqrt(hub) * 0.62 + Math.min(degree, 8) * 0.12, 3.4, 10.8);
+  }
+
+  function graphLinkWidth(opportunity, highlighted) {
+    if (highlighted) return 1.35;
+    return clamp(0.28 + linkWidth(opportunity?.estimatedValue || 0) * 0.12, 0.38, 0.95);
+  }
+
+  function drawCurvedLink(link) {
+    const dx = link.target.x - link.source.x;
+    const dy = link.target.y - link.source.y;
+    const distance = Math.sqrt(dx * dx + dy * dy) || 1;
+    const curveSeed = (hashString(link.id) % 200) / 100 - 1;
+    const curve = curveSeed * clamp(distance * 0.08, 12, 44);
+    const midX = (link.source.x + link.target.x) / 2;
+    const midY = (link.source.y + link.target.y) / 2;
+    const controlX = midX + (-dy / distance) * curve;
+    const controlY = midY + (dx / distance) * curve;
+
+    ctx.beginPath();
+    ctx.moveTo(link.source.x, link.source.y);
+    ctx.quadraticCurveTo(controlX, controlY, link.target.x, link.target.y);
+  }
+
+  function nodeClusterColor(node, highlighted) {
+    const color = node.type === "advisor" ? NODE_CLUSTER_COLORS.advisor : NODE_CLUSTER_COLORS[node.countryRegion] || "#64748b";
+    return withAlpha(color, highlighted ? 0.95 : 0.84);
+  }
+
+  function isLabelNode(node) {
+    if (node.type !== "company") return false;
+    return (
+      Number(node.hubScore) >= 25 ||
+      Number(node.degree) >= 4 ||
+      (Number(node.expectedValueRank) > 0 && Number(node.expectedValueRank) <= 8)
+    );
   }
 
   function linkWidth(value) {
-    return 2.2;
+    return scaledLinkWidth(value);
   }
 
   function withAlpha(hex, alpha) {
@@ -1542,6 +1747,32 @@
 
   function trimLabel(label, max) {
     return label.length > max ? `${label.slice(0, max)}…` : label;
+  }
+
+  function shortAdvisorName(advisor) {
+    const name = String(advisor.name || "顾问").trim();
+    if (/^[A-Za-z\s]+$/.test(name)) return name.split(/\s+/).slice(0, 2).join(" ");
+    return trimLabel(name, 7);
+  }
+
+  function shortCompanyName(company, strong) {
+    const name = String(company.name || "公司").trim();
+    const city = normalizeCompanyCity(company.city) || inferCityFromText(name) || "";
+    let base = city && name.startsWith(city) ? name.slice(city.length) : name;
+    const business = String(company.mainBusiness || "").trim();
+    if (business) base = base.replace(business, "");
+    base = base
+      .replace(/(有限责任公司|科技有限公司|智能制造公司|国际贸易公司|创新科技公司|产业集团|有限公司|集团|公司)$/g, "")
+      .replace(/(有限责任|科技|智能制造|国际贸易|创新科技|产业)$/g, "")
+      .trim();
+    if (!base || base.length < 2) base = city ? `${city}${base || name.slice(0, 2)}` : name;
+    return trimLabel(base, strong ? 10 : 6);
+  }
+
+  function hashString(value) {
+    return String(value || "")
+      .split("")
+      .reduce((hash, char) => ((hash << 5) - hash + char.charCodeAt(0)) | 0, 0) >>> 0;
   }
 
   function onPointerDown(event) {
@@ -1743,6 +1974,8 @@
         probability: opportunity.probability,
         confidence: opportunity.confidence,
         expected_value: opportunity.expectedValue,
+        hub_score: opportunity.hubScore || 0,
+        expected_value_rank: opportunity.expectedValueRank || null,
         evidence: opportunity.evidence,
         matched_needs: opportunity.matchedNeeds,
         risk_factors: opportunity.riskFactors || [],
@@ -1775,32 +2008,7 @@
     if (isProxyAiEndpoint(baseUrl)) {
       return extractReportJson(await postJson(baseUrl, payload));
     }
-    if (state.aiConfig.apiKey) {
-      return callOpenAiCompatibleReportApi(baseUrl, payload);
-    }
-    if (/\/v1\/?$/.test(baseUrl) || /api\.openai\.com/i.test(baseUrl)) {
-      throw new Error("直连模型API需要填写API Key，推荐改用后端代理");
-    }
-    return extractReportJson(await postJson(baseUrl, payload));
-  }
-
-  async function callOpenAiCompatibleReportApi(baseUrl, payload) {
-    const response = await fetch(openAiChatEndpoint(baseUrl), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${state.aiConfig.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: payload.model,
-        messages: [
-          { role: "system", content: createReportSystemPrompt(payload.prompt) },
-          { role: "user", content: JSON.stringify(payload, null, 2) },
-        ],
-        response_format: { type: "json_object" },
-      }),
-    });
-    return extractReportJson(await readJsonResponse(response));
+    throw new Error("生产环境只允许使用后端代理 /api/analyze-opportunities");
   }
 
   function extractReportJson(data) {
@@ -1906,18 +2114,23 @@
     return `<${tag}>${list.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</${tag}>`;
   }
 
-  function saveCurrentReport() {
+  async function saveCurrentReport() {
     if (!requireAdmin()) return;
     if (!state.currentReport) return;
-    const reports = loadSavedReports();
-    reports.unshift(state.currentReport);
-    localStorage.setItem("aiconnect-opportunity-reports", JSON.stringify(reports.slice(0, 30)));
-    els.reportMeta.textContent = `${state.currentReport.sourceName} → ${state.currentReport.targetName} · 已保存本地`;
+    try {
+      await postJson("/api/reports", state.currentReport);
+    } catch (error) {
+      console.warn("Failed to persist remote report, using local fallback", error);
+      const reports = loadSavedReports();
+      reports.unshift(state.currentReport);
+      localStorage.setItem("3hk-hub-opportunity-reports", JSON.stringify(reports.slice(0, 30)));
+    }
+    els.reportMeta.textContent = `${state.currentReport.sourceName} → ${state.currentReport.targetName} · 已保存`;
   }
 
   function loadSavedReports() {
     try {
-      const raw = localStorage.getItem("aiconnect-opportunity-reports");
+      const raw = localStorage.getItem("3hk-hub-opportunity-reports") || localStorage.getItem("aiconnect-opportunity-reports");
       const parsed = raw ? JSON.parse(raw) : [];
       return Array.isArray(parsed) ? parsed : [];
     } catch (error) {
@@ -1983,7 +2196,7 @@
       if (!visible.has(node.id)) continue;
       const dx = x - node.x;
       const dy = y - node.y;
-      if (Math.sqrt(dx * dx + dy * dy) <= node.radius + 5) return node;
+      if (Math.sqrt(dx * dx + dy * dy) <= SIMPLE_NODE_HIT_RADIUS) return node;
     }
     return null;
   }
@@ -2022,16 +2235,16 @@
     }
     let html = "";
     if (hover.type === "node") {
-      const node = hover.node;
-      html =
-        node.type === "company"
-          ? `<strong>${node.name}</strong>${node.industry}｜${node.countryRegion}${node.city ? `｜${node.city}` : ""}<br>营收：${formatRevenueMoney(node.revenue)}<br>需求：${node.needs.join("、")}`
-          : `<strong>${node.name}</strong>${node.title}<br>${node.organization}<br>能力：${node.capabilities.join("、")}`;
+        const node = hover.node;
+        html =
+          node.type === "company"
+            ? `<strong>${escapeHtml(node.name)}</strong>${escapeHtml(node.industry)}｜${escapeHtml(node.countryRegion)}${node.city ? `｜${escapeHtml(node.city)}` : ""}<br>营收：${formatRevenueMoney(node.revenue)}<br>Hub Score：${formatNumber(node.hubScore || 0)}<br>需求：${node.needs.map(escapeHtml).join("、")}`
+            : `<strong>${escapeHtml(node.name)}</strong>${escapeHtml(node.title)}<br>${escapeHtml(node.organization)}<br>Hub Score：${formatNumber(node.hubScore || 0)}<br>能力：${node.capabilities.map(escapeHtml).join("、")}`;
     } else {
       const opportunity = opportunityForLink(hover.link);
       const source = state.nodeById.get(opportunity.sourceCompanyId);
       const target = state.nodeById.get(opportunity.targetCompanyId);
-      html = `<strong>${opportunity.opportunityType}｜${statusText(opportunity.status)}</strong>${source.name}<br>→ ${target.name}<br>规模：${formatOpportunityMoney(opportunity.estimatedValue)}，概率：${formatPercent(opportunity.probability)}`;
+      html = `<strong>${escapeHtml(opportunity.opportunityType)}｜${statusText(opportunity.status)}</strong>${escapeHtml(source.name)}<br>→ ${escapeHtml(target.name)}<br>规模：${formatOpportunityMoney(opportunity.estimatedValue)}，概率：${formatPercent(opportunity.probability)}<br>Hub Score：${formatNumber(opportunity.hubScore || 0)}`;
     }
     els.tooltip.innerHTML = html;
     els.tooltip.style.left = `${Math.min(point.x + 14, state.width - 280)}px`;
@@ -2055,15 +2268,17 @@
   }
 
   function renderTopList() {
-    const top = [...state.opportunities].sort((a, b) => b.expectedValue - a.expectedValue).slice(0, 5);
+    const top = [...state.opportunities]
+      .sort((a, b) => (b.hubScore || 0) - (a.hubScore || 0) || b.expectedValue - a.expectedValue)
+      .slice(0, 5);
     els.topList.innerHTML = top
       .map((item) => {
         const source = state.nodeById.get(item.sourceCompanyId);
         const target = state.nodeById.get(item.targetCompanyId);
         return `<div class="top-item" data-id="${item.id}">
-          <strong>${item.opportunityType}｜${formatOpportunityMoney(item.expectedValue)}</strong>
-          <span>${trimLabel(source.name, 13)} → ${trimLabel(target.name, 13)}</span>
-          <span>${statusText(item.status)}，概率 ${formatPercent(item.probability)}</span>
+          <strong>${escapeHtml(item.opportunityType)}｜Hub ${formatNumber(item.hubScore || 0)}</strong>
+          <span>${escapeHtml(trimLabel(source.name, 13))} → ${escapeHtml(trimLabel(target.name, 13))}</span>
+          <span>${statusText(item.status)}，期望值 ${formatOpportunityMoney(item.expectedValue)}</span>
         </div>`;
       })
       .join("");
@@ -2108,20 +2323,23 @@
     );
     els.detailPanel.innerHTML = `
       <div class="detail-title">
-        <h3>${company.name}</h3>
-        <span class="node-kind">${company.industry}</span>
+        <h3>${escapeHtml(company.name)}</h3>
+        <span class="node-kind">${escapeHtml(company.industry)}</span>
       </div>
       <div class="kv">
-        <span>地区</span><strong>${company.countryRegion}</strong>
-        <span>城市</span><strong>${company.city || "未填写"}</strong>
-        <span>主营业务</span><strong>${company.mainBusiness}</strong>
+        <span>地区</span><strong>${escapeHtml(company.countryRegion)}</strong>
+        <span>城市</span><strong>${escapeHtml(company.city || "未填写")}</strong>
+        <span>主营业务</span><strong>${escapeHtml(company.mainBusiness)}</strong>
         <span>年收入</span><strong>${formatRevenueMoney(company.revenue)}</strong>
         <span>员工数</span><strong>${formatNumber(company.employeeCount)}</strong>
-        <span>阶段</span><strong>${company.companyStage}</strong>
+        <span>阶段</span><strong>${escapeHtml(company.companyStage)}</strong>
         <span>机会数</span><strong>${related.length}</strong>
+        <span>Hub Score</span><strong>${formatNumber(company.hubScore || 0)}</strong>
+        <span>Degree</span><strong>${formatNumber(company.degree || 0)}</strong>
+        <span>Bridge Score</span><strong>${formatNumber(company.bridgeScore || 0)}</strong>
       </div>
-      <div class="tag-list">${company.needs.map((tag) => `<span class="tag">需求：${tag}</span>`).join("")}</div>
-      <div class="tag-list">${company.resources.map((tag) => `<span class="tag">资源：${tag}</span>`).join("")}</div>
+      <div class="tag-list">${company.needs.map((tag) => `<span class="tag">需求：${escapeHtml(tag)}</span>`).join("")}</div>
+      <div class="tag-list">${company.resources.map((tag) => `<span class="tag">资源：${escapeHtml(tag)}</span>`).join("")}</div>
     `;
   }
 
@@ -2130,17 +2348,20 @@
     const related = state.opportunities.filter((item) => item.advisorId === advisor.id);
     els.detailPanel.innerHTML = `
       <div class="detail-title">
-        <h3>${advisor.name}</h3>
-        <span class="node-kind">${advisor.countryRegion}</span>
+        <h3>${escapeHtml(advisor.name)}</h3>
+        <span class="node-kind">${escapeHtml(advisor.countryRegion)}</span>
       </div>
       <div class="kv">
-        <span>头衔</span><strong>${advisor.title}</strong>
-        <span>任职单位</span><strong>${advisor.organization}</strong>
+        <span>头衔</span><strong>${escapeHtml(advisor.title)}</strong>
+        <span>任职单位</span><strong>${escapeHtml(advisor.organization)}</strong>
         <span>关系强度</span><strong>${advisor.relationshipStrength}/100</strong>
         <span>覆盖机会</span><strong>${related.length}</strong>
+        <span>Hub Score</span><strong>${formatNumber(advisor.hubScore || 0)}</strong>
+        <span>Degree</span><strong>${formatNumber(advisor.degree || 0)}</strong>
+        <span>Bridge Score</span><strong>${formatNumber(advisor.bridgeScore || 0)}</strong>
       </div>
-      <div class="tag-list">${advisor.capabilities.map((tag) => `<span class="tag">${tag}</span>`).join("")}</div>
-      <div class="tag-list">${advisor.industries.map((tag) => `<span class="tag">${tag}</span>`).join("")}</div>
+      <div class="tag-list">${advisor.capabilities.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>
+      <div class="tag-list">${advisor.industries.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>
     `;
   }
 
@@ -2151,20 +2372,22 @@
     const advisor = opportunity.advisorId ? state.nodeById.get(opportunity.advisorId) : null;
     els.detailPanel.innerHTML = `
       <div class="detail-title">
-        <h3>${opportunity.opportunityType}</h3>
+        <h3>${escapeHtml(opportunity.opportunityType)}</h3>
         <span class="node-kind">${statusText(opportunity.status)}</span>
       </div>
-      <p>${opportunity.description}</p>
+      <p>${escapeHtml(opportunity.description)}</p>
       <div class="kv">
-        <span>来源公司</span><strong>${source.name}</strong>
-        <span>目标公司</span><strong>${target.name}</strong>
-        <span>推荐顾问</span><strong>${advisor ? advisor.name : "待确认"}</strong>
+        <span>来源公司</span><strong>${escapeHtml(source.name)}</strong>
+        <span>目标公司</span><strong>${escapeHtml(target.name)}</strong>
+        <span>推荐顾问</span><strong>${escapeHtml(advisor ? advisor.name : "待确认")}</strong>
         <span>机会规模</span><strong>${formatOpportunityMoney(opportunity.estimatedValue)}</strong>
         <span>成交概率</span><strong>${formatPercent(opportunity.probability)}</strong>
         <span>期望值</span><strong>${formatOpportunityMoney(opportunity.expectedValue)}</strong>
+        <span>Hub Score</span><strong>${formatNumber(opportunity.hubScore || 0)}</strong>
+        <span>价值排名</span><strong>${opportunity.expectedValueRank ? `#${opportunity.expectedValueRank}` : "未排序"}</strong>
         <span>备注</span><strong>${escapeHtml(opportunity.remark || "暂无")}</strong>
       </div>
-      <div class="tag-list">${opportunity.evidence.map((item) => `<span class="tag">${item}</span>`).join("")}</div>
+      <div class="tag-list">${opportunity.evidence.map((item) => `<span class="tag">${escapeHtml(item)}</span>`).join("")}</div>
       ${renderFollowUps(opportunity)}
       ${renderAiAnalysisDetail(opportunity)}
     `;
@@ -2215,6 +2438,9 @@
           <td>${company.needs.map(escapeHtml).join("、")}</td>
           <td>${company.resources.map(escapeHtml).join("、")}</td>
           <td>${company.confidenceScore}</td>
+          <td>${formatNumber(company.hubScore || 0)}</td>
+          <td>${formatNumber(company.degree || 0)}</td>
+          <td>${formatNumber(company.bridgeScore || 0)}</td>
           ${
             isAdmin()
               ? `<td class="row-actions">
@@ -2228,7 +2454,7 @@
       .join("");
     els.dataTable.innerHTML = `
       <thead><tr>
-        <th>公司名称</th><th>地区</th><th>城市</th><th>行业</th><th>主营业务</th><th>收入规模（亿人民币）</th><th>痛点/需求</th><th>资源</th><th>可信度</th>${actionHeader}
+        <th>公司名称</th><th>地区</th><th>城市</th><th>行业</th><th>主营业务</th><th>收入规模（亿人民币）</th><th>痛点/需求</th><th>资源</th><th>可信度</th><th>Hub Score</th><th>Degree</th><th>Bridge</th>${actionHeader}
       </tr></thead>
       <tbody>${rows}</tbody>`;
     bindTableActions();
@@ -2248,6 +2474,9 @@
           <td>${advisor.industries.map(escapeHtml).join("、")}</td>
           <td>${advisor.regions.map(escapeHtml).join("、")}</td>
           <td>${advisor.relationshipStrength}</td>
+          <td>${formatNumber(advisor.hubScore || 0)}</td>
+          <td>${formatNumber(advisor.degree || 0)}</td>
+          <td>${formatNumber(advisor.bridgeScore || 0)}</td>
           ${
             isAdmin()
               ? `<td class="row-actions">
@@ -2261,7 +2490,7 @@
       .join("");
     els.dataTable.innerHTML = `
       <thead><tr>
-        <th>姓名</th><th>头衔</th><th>任职单位</th><th>地区</th><th>关键能力</th><th>覆盖行业</th><th>覆盖区域</th><th>关系强度</th>${actionHeader}
+        <th>姓名</th><th>头衔</th><th>任职单位</th><th>地区</th><th>关键能力</th><th>覆盖行业</th><th>覆盖区域</th><th>关系强度</th><th>Hub Score</th><th>Degree</th><th>Bridge</th>${actionHeader}
       </tr></thead>
       <tbody>${rows}</tbody>`;
     bindTableActions();
@@ -2349,7 +2578,7 @@
       createdAt: new Date().toISOString().slice(0, 10),
       isNew: false,
     };
-    company.radius = companyRadius(company.revenue);
+    company.radius = graphNodeRadius(company);
     upsertById(state.companies, company);
     closeEditor();
     recomputeDataset(true);
@@ -2405,14 +2634,16 @@
         const target = state.nodeById.get(opportunity.targetCompanyId);
         const advisor = opportunity.advisorId ? state.nodeById.get(opportunity.advisorId) : null;
         return `<tr>
-          <td><span class="status-pill status-${opportunity.status}">${statusText(opportunity.status)}</span></td>
-          <td>${opportunity.opportunityType}${opportunity.aiAnalyzedAt ? '<span class="ai-badge">AI</span>' : ""}</td>
-          <td>${source.name}</td>
-          <td>${target.name}</td>
-          <td>${advisor ? advisor.name : "待确认"}</td>
+          <td><span class="status-pill status-${escapeAttr(opportunity.status)}">${statusText(opportunity.status)}</span></td>
+          <td>${escapeHtml(opportunity.opportunityType)}${opportunity.aiAnalyzedAt ? '<span class="ai-badge">AI</span>' : ""}</td>
+          <td>${escapeHtml(source.name)}</td>
+          <td>${escapeHtml(target.name)}</td>
+          <td>${escapeHtml(advisor ? advisor.name : "待确认")}</td>
           <td class="money">${formatOpportunityMoney(opportunity.estimatedValue)}</td>
           <td>${formatPercent(opportunity.probability)}</td>
           <td class="money">${formatOpportunityMoney(opportunity.expectedValue)}</td>
+          <td>${formatNumber(opportunity.hubScore || 0)}</td>
+          <td>${opportunity.expectedValueRank ? `#${opportunity.expectedValueRank}` : ""}</td>
           <td>${escapeHtml(opportunity.remark || "")}</td>
           ${normalizeFollowUps(opportunity.followUps).map((item) => `<td>${escapeHtml(item)}</td>`).join("")}
         </tr>`;
@@ -2420,7 +2651,7 @@
       .join("");
     els.dataTable.innerHTML = `
       <thead><tr>
-        <th>状态</th><th>类型</th><th>来源公司</th><th>目标公司</th><th>顾问</th><th>机会规模（百万人民币）</th><th>概率</th><th>期望值（百万人民币）</th><th>备注</th><th>跟进1</th><th>跟进2</th><th>跟进3</th><th>跟进4</th><th>跟进5</th>
+        <th>状态</th><th>类型</th><th>来源公司</th><th>目标公司</th><th>顾问</th><th>机会规模（百万人民币）</th><th>概率</th><th>期望值（百万人民币）</th><th>Hub Score</th><th>价值排名</th><th>备注</th><th>跟进1</th><th>跟进2</th><th>跟进3</th><th>跟进4</th><th>跟进5</th>
       </tr></thead>
       <tbody>${rows}</tbody>`;
   }
@@ -2571,7 +2802,7 @@
       createdAt: new Date().toISOString().slice(0, 10),
       isNew: true,
     };
-    company.radius = companyRadius(company.revenue);
+    company.radius = graphNodeRadius(company);
     return company;
   }
 
@@ -2645,6 +2876,8 @@
           probability: opportunity.probability,
           confidence: opportunity.confidence,
           expected_value: opportunity.expectedValue,
+          hub_score: opportunity.hubScore || 0,
+          expected_value_rank: opportunity.expectedValueRank || null,
           evidence: opportunity.evidence,
         };
       }),
@@ -2684,6 +2917,9 @@
       resources: company.resources,
       pain_points: company.painPoints,
       confidence_score: company.confidenceScore,
+      hub_score: company.hubScore || 0,
+      degree: company.degree || 0,
+      bridge_score: company.bridgeScore || 0,
     };
   }
 
@@ -2699,6 +2935,9 @@
       regions: advisor.regions,
       relationship_strength: advisor.relationshipStrength,
       cases: advisor.cases,
+      hub_score: advisor.hubScore || 0,
+      degree: advisor.degree || 0,
+      bridge_score: advisor.bridgeScore || 0,
     };
   }
 
@@ -2716,46 +2955,11 @@
       return extractAiJson(await postJson(baseUrl, payload));
     }
 
-    if (state.aiConfig.apiKey) {
-      return callOpenAiCompatibleApi(baseUrl, payload);
-    }
-
-    if (/\/v1\/?$/.test(baseUrl) || /api\.openai\.com/i.test(baseUrl)) {
-      throw new Error("直连模型API需要填写API Key，推荐改用后端代理");
-    }
-
-    return extractAiJson(await postJson(baseUrl, payload));
+    throw new Error("生产环境只允许使用后端代理 /api/analyze-opportunities");
   }
 
   function isProxyAiEndpoint(baseUrl) {
     return baseUrl.startsWith("/") || /\/api\/analyze-opportunities\/?$/i.test(baseUrl);
-  }
-
-  async function callOpenAiCompatibleApi(baseUrl, payload) {
-    const endpoint = openAiChatEndpoint(baseUrl);
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${state.aiConfig.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: payload.model,
-        messages: [
-          { role: "system", content: payload.prompt },
-          { role: "user", content: JSON.stringify(payload, null, 2) },
-        ],
-        response_format: { type: "json_object" },
-      }),
-    });
-    const data = await readJsonResponse(response);
-    return extractAiJson(data);
-  }
-
-  function openAiChatEndpoint(baseUrl) {
-    const clean = baseUrl.replace(/\/+$/, "");
-    if (/\/chat\/completions$/.test(clean)) return clean;
-    return `${clean}/chat/completions`;
   }
 
   async function postJson(url, payload) {
@@ -2928,7 +3132,7 @@
       resources: arrayFromValue(company.resources),
       painPoints: arrayFromValue(company.painPoints?.length ? company.painPoints : company.needs),
       confidenceScore: Number(company.confidenceScore) || 80,
-      radius: companyRadius(Number(company.revenue) || 0),
+      radius: graphNodeRadius(company),
     }));
     state.advisors = state.advisors.map((advisor, index) => ({
       ...advisor,
@@ -2961,24 +3165,45 @@
     }));
   }
 
-  function saveData() {
+  async function saveData() {
     try {
-      localStorage.setItem(
-        "aiconnect-demo-data",
-        JSON.stringify({
-          companies: state.companies,
-          advisors: state.advisors,
-          opportunities: state.opportunities,
-        }),
-      );
+      await saveDataset({
+        companies: state.companies,
+        advisors: state.advisors,
+        opportunities: state.opportunities,
+      });
     } catch (error) {
-      console.warn("Failed to save local data", error);
+      console.warn("Failed to save remote data, using local fallback", error);
+      try {
+        localStorage.setItem(
+          "3hk-hub-local-migration-data",
+          JSON.stringify({
+            companies: state.companies,
+            advisors: state.advisors,
+            opportunities: state.opportunities,
+          }),
+        );
+      } catch (storageError) {
+        console.warn("Failed to save local fallback data", storageError);
+      }
     }
   }
 
-  function loadSavedData() {
+  async function loadSavedData() {
     try {
-      const raw = localStorage.getItem("aiconnect-demo-data");
+      const remote = await loadDataset();
+      if (Array.isArray(remote.companies) && Array.isArray(remote.advisors) && remote.companies.length) {
+        return {
+          companies: remote.companies,
+          advisors: remote.advisors,
+          opportunities: Array.isArray(remote.opportunities) ? remote.opportunities : [],
+        };
+      }
+    } catch (error) {
+      console.warn("Failed to load remote data, using local fallback", error);
+    }
+    try {
+      const raw = localStorage.getItem("3hk-hub-local-migration-data") || localStorage.getItem("aiconnect-demo-data");
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed.companies) || !Array.isArray(parsed.advisors)) return null;
@@ -2988,7 +3213,7 @@
         opportunities: Array.isArray(parsed.opportunities) ? parsed.opportunities : [],
       };
     } catch (error) {
-      console.warn("Failed to load local data", error);
+      console.warn("Failed to load fallback data", error);
       return null;
     }
   }
@@ -3039,7 +3264,7 @@
       xlsx.utils.book_append_sheet(workbook, xlsx.utils.json_to_sheet(state.companies.map(companyToExcelRow)), "公司数据库");
       xlsx.utils.book_append_sheet(workbook, xlsx.utils.json_to_sheet(state.advisors.map(advisorToExcelRow)), "顾问数据库");
       xlsx.utils.book_append_sheet(workbook, xlsx.utils.json_to_sheet(state.opportunities.map(opportunityToExcelRow)), "机会池");
-      xlsx.writeFile(workbook, `aiconnect-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      xlsx.writeFile(workbook, `3hk-hub-${new Date().toISOString().slice(0, 10)}.xlsx`);
     } catch (error) {
       alert(`Excel导出失败：${error.message}`);
     }
@@ -3138,7 +3363,7 @@
       createdAt: String(rowValue(row, ["创建日期", "createdAt"]) || new Date().toISOString().slice(0, 10)),
       isNew: false,
     };
-    company.radius = companyRadius(company.revenue);
+    company.radius = graphNodeRadius(company);
     return company;
   }
 
@@ -3292,6 +3517,7 @@
     if (!requireAdmin()) return;
     if (!confirm("确认重置为模拟数据？当前本地保存的数据会被覆盖。")) return;
     try {
+      localStorage.removeItem("3hk-hub-local-migration-data");
       localStorage.removeItem("aiconnect-demo-data");
     } catch (error) {
       console.warn("Failed to clear local data", error);
@@ -3302,18 +3528,26 @@
     flashTableSummary("已重置为模拟数据");
   }
 
-  function loadAdminConfig() {
+  async function loadAdminConfig() {
+    try {
+      const remote = await fetchRemoteConfig();
+      if (remote?.ruleConfig || remote?.aiConfig) {
+        state.ruleConfig = { ...DEFAULT_RULE_CONFIG, ...(remote.ruleConfig || {}) };
+        state.aiConfig = { ...DEFAULT_AI_CONFIG, ...(remote.aiConfig || {}), apiKey: "" };
+        return;
+      }
+    } catch (error) {
+      console.warn("Failed to load remote admin config, using local fallback", error);
+    }
     try {
       const raw = localStorage.getItem("aiconnect-admin-config");
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        const { apiKey, ...storedAiConfig } = parsed.aiConfig || {};
-        state.ruleConfig = { ...DEFAULT_RULE_CONFIG, ...(parsed.ruleConfig || {}) };
-        state.aiConfig = { ...DEFAULT_AI_CONFIG, ...storedAiConfig };
-      }
-      state.aiConfig.apiKey = sessionStorage.getItem("aiconnect-api-key") || "";
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const { apiKey, ...storedAiConfig } = parsed.aiConfig || {};
+      state.ruleConfig = { ...DEFAULT_RULE_CONFIG, ...(parsed.ruleConfig || {}) };
+      state.aiConfig = { ...DEFAULT_AI_CONFIG, ...storedAiConfig, apiKey: "" };
     } catch (error) {
-      console.warn("Failed to load admin config", error);
+      console.warn("Failed to load local admin config", error);
     }
   }
 
@@ -3333,7 +3567,7 @@
     updatePromptPreview();
   }
 
-  function saveAdminConfigFromForm() {
+  async function saveAdminConfigFromForm() {
     if (!requireAdmin()) return;
     state.ruleConfig = {
       needWeight: numberFromInput(els.needWeight, DEFAULT_RULE_CONFIG.needWeight),
@@ -3348,13 +3582,16 @@
       provider: els.apiProvider.value.trim(),
       baseUrl: els.apiBaseUrl.value.trim(),
       model: els.apiModel.value.trim(),
-      apiKey: els.apiKey.value.trim(),
+      apiKey: "",
       prompt: els.matchPrompt.value.trim(),
     };
-    if (state.aiConfig.apiKey) sessionStorage.setItem("aiconnect-api-key", state.aiConfig.apiKey);
-    else sessionStorage.removeItem("aiconnect-api-key");
     const savedAiConfig = { ...state.aiConfig, apiKey: "" };
-    localStorage.setItem("aiconnect-admin-config", JSON.stringify({ ruleConfig: state.ruleConfig, aiConfig: savedAiConfig }));
+    try {
+      await persistRemoteConfig({ ruleConfig: state.ruleConfig, aiConfig: savedAiConfig });
+    } catch (error) {
+      console.warn("Failed to persist remote config, using local fallback", error);
+      localStorage.setItem("aiconnect-admin-config", JSON.stringify({ ruleConfig: state.ruleConfig, aiConfig: savedAiConfig }));
+    }
     recomputeDataset(true);
     updatePromptPreview();
     flashTableSummary("规则和AI配置已保存，机会池已重算");
@@ -3365,7 +3602,6 @@
     state.ruleConfig = structuredClone(DEFAULT_RULE_CONFIG);
     state.aiConfig = structuredClone(DEFAULT_AI_CONFIG);
     localStorage.removeItem("aiconnect-admin-config");
-    sessionStorage.removeItem("aiconnect-api-key");
     renderAdminConfig();
     recomputeDataset(true);
     flashTableSummary("已恢复默认规则并重算");
@@ -3380,7 +3616,7 @@
       provider: els.apiProvider.value || DEFAULT_AI_CONFIG.provider,
       model: els.apiModel.value || DEFAULT_AI_CONFIG.model,
       base_url: els.apiBaseUrl.value || DEFAULT_AI_CONFIG.baseUrl,
-      api_mode: els.apiKey.value ? "browser_direct_openai_compatible" : "backend_proxy",
+      api_mode: "backend_proxy_only",
       system_prompt: els.matchPrompt.value || DEFAULT_AI_CONFIG.prompt,
       input_schema: {
         source_company: source
@@ -3526,7 +3762,7 @@
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "aiconnect-demo-data.json";
+    link.download = "3hk-hub-data.json";
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -3567,15 +3803,10 @@
   }
 
   function escapeHtml(value) {
-    return String(value ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
+    return safeHtml(value);
   }
 
   function escapeAttr(value) {
-    return escapeHtml(value);
+    return safeAttr(value);
   }
 })();

@@ -1,0 +1,3 @@
+# Add old-domain 301 redirects in Cloudflare Bulk Redirects after the
+# previous public domain is confirmed. Production canonical domain:
+# https://hub.3hk.xyz/

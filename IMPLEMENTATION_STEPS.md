@@ -1,79 +1,74 @@
-# AIConnect 真实初始化与智能匹配执行步骤
+# 3HK Hub 生产部署与初始化步骤
 
-## 1. 准备真实数据
+## 1. 创建 Cloudflare 资源
 
-按 `real-data-template.json` 准备公司和顾问数据：
+```powershell
+npx wrangler d1 create 3hk-hub
+npx wrangler d1 execute 3hk-hub --file migrations/0001_initial.sql
+npx wrangler pages secret put OPENAI_API_KEY
+```
 
-- `companies`: 公司名称、地区、行业、主营业务、收入规模、需求、资源、痛点。
-- `advisors`: 顾问姓名、头衔、机构、能力、覆盖行业、覆盖区域、关系强度。
+把生成的 D1 `database_id` 写入 `wrangler.toml`。
 
-## 2. 导入初始化数据
+## 2. 配置 Cloudflare Access
 
-进入页面底部“数据管理”：
+- 为 Pages 项目或写入型 `/api/*` 路由配置 Access 策略。
+- 设置 `ADMIN_EMAILS`，例如 `founder@3hk.xyz,ops@3hk.xyz`。
+- 前端通过 `GET /api/session` 判断管理员身份；邮箱注册访客保持只读。
+- 访客可通过 `/api/register` 邮箱注册，系统写入 `visitors` 和 `visitor_sessions`，并自动建立只读访客会话。
 
-1. 管理员权限下点击“导入 Excel”或“导入 JSON”。
-2. 选择真实数据文件。
-3. 系统自动重算机会池、顾问连接和图谱。
-4. 点击“保存本地”。
+## 3. 绑定生产域名
 
-Excel 推荐包含三张表：`公司数据库`、`顾问数据库`、`机会池`。如果只导入一张项目清单，系统会按公司清单处理并重新生成机会池。
+在 Cloudflare Pages 项目中添加自定义域名：
 
-字段单位：
+```text
+hub.3hk.xyz
+```
 
-- 中国大陆企业：`城市`，用于地图城市坐标落点。
-- 公司收入：`收入规模（亿人民币）`
-- 机会金额：`机会规模（百万人民币）`、`期望值（百万人民币）`
-- 机会跟进：`备注`、`跟进1`、`跟进2`、`跟进3`、`跟进4`、`跟进5`
+如果 `3hk.xyz` 在同一 Cloudflare 账户，DNS 通常会自动创建；否则添加 CNAME：
 
-## 3. 配置规则引擎
+```text
+hub -> <your-pages-project>.pages.dev
+```
 
-进入“规则引擎与 AI 配置后台”：
+## 4. 导入初始数据
 
-- `需求资源匹配`: 控制公司需求和资源的匹配权重。
-- `同业协同`: 控制同一行业的加分。
-- `跨区域机会`: 控制出海、区域互补的加分。
-- `规模承接关系`: 控制大公司需求与供应商承接能力的加分。
-- `顾问影响力`: 控制顾问资源对机会评分的影响。
-- `强匹配阈值`: 控制进入高质量机会池的最低分数。
+1. 管理员通过 Cloudflare Access 登录。
+2. 在数据管理区导入 Excel 或 JSON。
+3. 系统写入 D1 并重新计算 Hub metrics。
+4. 导出的金额单位保持：
+   - 公司收入：人民币元，Excel 显示为亿人民币。
+   - 机会金额：人民币元，Excel 显示为百万人民币。
 
-点击“保存配置并重算”后，机会池会立即更新。
+## 5. 规则与 AI 配置
 
-## 4. 配置 AI 提示词
+后台配置中的权重含义：
 
-在“智能匹配提示词”中维护系统提示词。建议要求模型输出结构化 JSON：
+- `Demand-Resource Match`: 需求资源匹配。
+- `Industry Affinity`: 行业相似与协同。
+- `Cross-Border Bridge`: 跨区域桥接路径。
+- `Scale Fit`: 规模承接关系。
+- `Advisor Influence`: 顾问影响力。
 
-- `opportunity_type`
-- `source_company`
-- `target_company`
-- `recommended_advisor`
-- `estimated_value`
-- `probability`
-- `expected_value`
-- `evidence`
-- `risk_factors`
+AI 调用只允许后端代理：
 
-## 5. 配置模型 API
+```text
+/api/analyze-opportunities
+```
 
-当前版本已支持真实 AI 分析：
+不要在前端保存或填写模型 API Key。
 
-1. 前端先用规则引擎生成候选机会。
-2. 启用“真实AI分析”后，前端把候选机会提交到 `/api/analyze-opportunities`。
-3. Cloudflare Pages Function 从 `OPENAI_API_KEY` 读取密钥。
-4. 后端调用 OpenAI-compatible Chat Completions API。
-5. 模型返回结构化 JSON。
-6. 前端合并 AI 的机会排序、证据、风险因素和下一步建议。
+## 6. 验证
 
-本地直连测试也可以在后台填写 `https://api.openai.com/v1` 和 API Key。API Key 只保存在当前浏览器会话。
+```powershell
+npm test
+npm run build
+npm run test:e2e
+```
 
-## 6. 生产化推荐架构
+生产发布后检查：
 
-- 前端：Cloudflare Pages
-- 后端：Cloudflare Workers / FastAPI / Node.js
-- 数据库：PostgreSQL / Supabase
-- 向量检索：pgvector
-- 模型：OpenAI API 或其他兼容 API
-- 密钥：Cloudflare Secrets / 后端环境变量
-
-## 7. 注意事项
-
-不要把真实 API Key 放在前端静态页面里。当前页面里的 API Key 输入框只用于本机直连测试，生产环境使用 `OPENAI_API_KEY` Secret。
+- `https://hub.3hk.xyz/` 正常打开。
+- 公共访客只读，邮箱注册后显示为已登录访客但不能执行写入操作。
+- 管理员通过 Access 后可导入、编辑、导出和生成报告。
+- `/api/analyze-opportunities` 拒绝未授权请求。

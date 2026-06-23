@@ -1,21 +1,21 @@
-const JSON_HEADERS = {
-  "Content-Type": "application/json; charset=utf-8",
-  "Cache-Control": "no-store",
-};
+import { audit, checkRateLimit, errorResponse, handleOptions, json, readJsonBody, requireAdmin } from "./_shared.js";
 
-export async function onRequestOptions() {
-  return new Response(null, { headers: corsHeaders() });
+export async function onRequestOptions(context) {
+  return handleOptions(context.request);
 }
 
 export async function onRequestPost(context) {
+  const { request, env } = context;
   try {
-    const { request, env } = context;
+    checkRateLimit(request, 25);
+    const identity = requireAdmin(request, env);
     const apiKey = env.OPENAI_API_KEY;
     if (!apiKey) {
-      return json({ error: "OPENAI_API_KEY is not configured" }, 500);
+      return json(request, { error: "OPENAI_API_KEY is not configured" }, 500);
     }
 
-    const body = await request.json();
+    const body = await readJsonBody(request, 500_000);
+    validateAnalysisPayload(body);
     const model = String(body.model || env.OPENAI_MODEL || "gpt-4.1-mini");
     const baseUrl = stripTrailingSlash(env.OPENAI_BASE_URL || "https://api.openai.com/v1");
     const upstream = await fetch(`${baseUrl}/chat/completions`, {
@@ -39,11 +39,12 @@ export async function onRequestPost(context) {
     try {
       upstreamJson = text ? JSON.parse(text) : null;
     } catch (error) {
-      return json({ error: "Model returned non-JSON response", detail: text.slice(0, 800) }, 502);
+      return json(request, { error: "Model returned non-JSON response", detail: text.slice(0, 800) }, 502);
     }
 
     if (!upstream.ok) {
       return json(
+        request,
         {
           error: upstreamJson?.error?.message || upstreamJson?.error || "Model API request failed",
           status: upstream.status,
@@ -54,14 +55,19 @@ export async function onRequestPost(context) {
 
     const content = upstreamJson?.choices?.[0]?.message?.content;
     const analysis = parseJsonFromText(content);
-    return json({ ...analysis, model, usage: upstreamJson?.usage || null });
+    await audit(env, identity, "ai_analyze", body.mode === "opportunity_report" ? "report" : "opportunity", null, {
+      mode: body.mode || "opportunity_match",
+      model,
+      candidates: Array.isArray(body.candidates) ? body.candidates.length : 0,
+    });
+    return json(request, { ...analysis, model, usage: upstreamJson?.usage || null });
   } catch (error) {
-    return json({ error: error.message || "AI analysis failed" }, 500);
+    return errorResponse(request, error);
   }
 }
 
-export async function onRequestGet() {
-  return json({ error: "Method not allowed" }, 405);
+export async function onRequestGet(context) {
+  return json(context.request, { error: "Method not allowed" }, 405);
 }
 
 function buildSystemPrompt(body) {
@@ -93,17 +99,12 @@ function stripTrailingSlash(value) {
   return String(value).replace(/\/+$/, "");
 }
 
-function json(payload, status = 200) {
-  return new Response(JSON.stringify(payload), {
-    status,
-    headers: { ...JSON_HEADERS, ...corsHeaders() },
-  });
-}
-
-function corsHeaders() {
-  return {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-  };
+function validateAnalysisPayload(body) {
+  if (!body || typeof body !== "object") throw new Error("Analysis payload is required");
+  if (body.mode === "opportunity_report") {
+    if (!body.opportunity) throw new Error("opportunity_report requires opportunity");
+    return;
+  }
+  if (!Array.isArray(body.candidates)) throw new Error("Opportunity analysis requires candidates");
+  if (body.candidates.length > 25) throw new Error("Too many candidates");
 }

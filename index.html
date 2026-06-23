@@ -3,15 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AIConnect 机会图谱 Demo</title>
+    <meta
+      name="description"
+      content="3HK Hub is an AI opportunity network for identifying hub nodes, bridge paths, trust edges and high-value business signals."
+    />
+    <link rel="canonical" href="https://hub.3hk.xyz/" />
+    <meta property="og:title" content="3HK Hub｜AI Opportunity Network" />
+    <meta property="og:description" content="识别关键节点、桥接路径与高价值机会信号。" />
+    <meta property="og:url" content="https://hub.3hk.xyz/" />
+    <meta property="og:type" content="website" />
+    <title>3HK Hub｜AI Opportunity Network</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div class="app-shell">
       <header class="topbar">
         <div>
-          <h1>AIConnect 机会图谱 Demo</h1>
-          <p>50 家公司、5 位顾问、AI 机会匹配、数据表和录入入口</p>
+          <h1>3HK Hub</h1>
+          <p>识别关键节点、桥接路径与高价值机会信号</p>
         </div>
         <div class="topbar-right">
           <div class="role-switch" aria-label="访问权限">
@@ -19,6 +28,7 @@
             <button id="viewerModeButton" class="role-button" type="button">访客</button>
             <button id="adminModeButton" class="role-button active" type="button">管理员</button>
           </div>
+          <button id="visitorRegisterButton" class="visitor-link" type="button">访客注册</button>
           <button id="openAdminButton" class="admin-link" type="button" data-admin-only>后台配置</button>
           <div class="stat-strip" aria-label="核心统计">
             <div class="stat">
@@ -35,7 +45,7 @@
             </div>
             <div class="stat">
               <span id="expectedTotal">0</span>
-              <small>机会点</small>
+              <small>期望值</small>
             </div>
           </div>
         </div>
@@ -81,7 +91,7 @@
               <strong>图例</strong>
               <div class="legend-row"><span class="line-sample solid"></span>合作进行中</div>
               <div class="legend-row"><span class="line-sample dashed"></span>潜在合作机会</div>
-              <div id="regionLegend" class="region-legend"></div>
+              <div id="regionLegend" class="region-legend" hidden></div>
             </div>
           </div>
           </section>
@@ -99,8 +109,8 @@
 
           <section class="panel-section">
             <div class="section-title">
-              <h2>高价值机会</h2>
-              <span>Top 5</span>
+              <h2>Hub 机会</h2>
+              <span>Hub Top 5</span>
             </div>
             <div id="topList" class="top-list"></div>
           </section>
@@ -116,8 +126,8 @@
         <section class="opportunity-entry" aria-label="AI录入机会" data-admin-only>
           <div class="entry-head">
             <div>
-              <h2>AI 录入</h2>
-              <span>录入新线索后自动加入机会池</span>
+              <h2>Hub Signal 录入</h2>
+              <span>录入新线索后识别 Hub 节点与桥接机会</span>
             </div>
             <div class="entry-actions">
               <button id="voiceButton" type="button">语音</button>
@@ -163,13 +173,13 @@
         </div>
         <div class="admin-grid">
           <div class="admin-card">
-            <h3>规则引擎权重</h3>
+            <h3>Hub 网络评分权重</h3>
             <div class="config-grid">
-              <label><span>需求资源匹配</span><input id="needWeight" type="number" step="0.1" min="0" /></label>
-              <label><span>同业协同</span><input id="industryWeight" type="number" step="0.1" min="0" /></label>
-              <label><span>跨区域机会</span><input id="regionWeight" type="number" step="0.1" min="0" /></label>
-              <label><span>规模承接关系</span><input id="scaleWeight" type="number" step="0.1" min="0" /></label>
-              <label><span>顾问影响力</span><input id="advisorWeight" type="number" step="0.1" min="0" /></label>
+              <label><span>Demand-Resource Match</span><input id="needWeight" type="number" step="0.1" min="0" /></label>
+              <label><span>Industry Affinity</span><input id="industryWeight" type="number" step="0.1" min="0" /></label>
+              <label><span>Cross-Border Bridge</span><input id="regionWeight" type="number" step="0.1" min="0" /></label>
+              <label><span>Scale Fit</span><input id="scaleWeight" type="number" step="0.1" min="0" /></label>
+              <label><span>Advisor Influence</span><input id="advisorWeight" type="number" step="0.1" min="0" /></label>
               <label><span>强匹配阈值</span><input id="strongMatchThreshold" type="number" step="0.1" min="0" /></label>
             </div>
           </div>
@@ -178,11 +188,11 @@
             <div class="config-grid">
               <label class="checkbox-label"><span>启用真实AI分析</span><input id="aiEnabled" type="checkbox" /></label>
               <label><span>Provider</span><input id="apiProvider" placeholder="OpenAI / Cloudflare AI / 自定义" /></label>
-              <label><span>Base URL / Proxy</span><input id="apiBaseUrl" placeholder="/api/analyze-opportunities 或 https://api.openai.com/v1" /></label>
+              <label><span>Backend Proxy</span><input id="apiBaseUrl" placeholder="/api/analyze-opportunities" /></label>
               <label><span>Model</span><input id="apiModel" placeholder="gpt-4.1-mini" /></label>
-              <label><span>API Key</span><input id="apiKey" type="password" placeholder="直连测试才填写，生产放后端密钥" /></label>
+              <input id="apiKey" type="hidden" />
             </div>
-            <p class="admin-note">默认调用同源 /api/analyze-opportunities 后端代理；API Key 只保存在当前浏览器会话，生产环境应使用后端密钥。</p>
+            <p class="admin-note">生产环境只允许调用同源 /api/analyze-opportunities 后端代理；模型密钥存放在 Cloudflare Secret。</p>
           </div>
           <div class="admin-card prompt-card">
             <h3>智能匹配提示词</h3>
@@ -200,35 +210,44 @@
           <span>Methodology</span>
           <h2>理论与技术基础</h2>
           <p>
-            AIConnect 将企业、顾问、资源、需求和交易机会建模为动态商业网络，用可计算的方式识别价值连接、降低交易摩擦，并形成可追溯的机会发现机制。
+            3HK Hub 将企业、顾问、资源、需求和交易机会建模为动态商业网络，用可计算的方式识别 Hub 节点、桥接路径、可信边和机会信号。
           </p>
         </div>
         <div class="theory-grid">
           <article>
-            <h3>复杂网络理论</h3>
-            <p>以节点、边、中心度、社群结构和路径长度刻画企业间资源流动，识别关键连接者、结构洞和高价值撮合路径。</p>
+            <h3>Hub Node</h3>
+            <p>用连接度、机会价值和顾问覆盖计算 Hub Score，识别能带动网络流动的关键企业与顾问。</p>
           </article>
           <article>
-            <h3>营销定位与影响理论</h3>
-            <p>将企业能力、市场位置和顾问影响力转化为标签与权重，评估谁能影响谁、何种资源能促成需求转化。</p>
+            <h3>Bridge Path</h3>
+            <p>从结构洞和跨区域路径中寻找桥接机会，让原本不相连的资本、客户、供应链与技术资源建立可推进连接。</p>
           </article>
           <article>
-            <h3>交易成本经济学</h3>
-            <p>围绕搜寻成本、信任成本、谈判成本和履约成本建立机会评分，优先推荐能显著降低交易摩擦的合作组合。</p>
+            <h3>Trust Edge</h3>
+            <p>把顾问关系强度、证据、历史案例和跟进记录沉淀为可信边，降低搜寻成本、信任成本和谈判摩擦。</p>
           </article>
           <article>
-            <h3>经济增加值模型</h3>
-            <p>用机会规模、成交概率、可信度和战略价值计算期望收益，帮助管理者把注意力集中在更高经济创造值的机会。</p>
+            <h3>Opportunity Signal</h3>
+            <p>用机会规模、成交概率、可信度和 Hub Score 共同排序，让管理者优先处理网络中更强的价值信号。</p>
           </article>
           <article>
             <h3>AI 语义匹配</h3>
-            <p>通过自然语言理解、行业标签、需求抽取和语义相似度分析，把非结构化线索转化为可计算的潜在合作关系。</p>
+            <p>通过自然语言理解、行业标签、需求抽取和语义相似度分析，把非结构化线索转化为可计算的网络候选边。</p>
           </article>
           <article>
             <h3>区块链信任机制</h3>
             <p>未来可将机会来源、顾问贡献、关键承诺和交易里程碑上链存证，形成可验证、可追溯、可分配的协作信任基础。</p>
           </article>
         </div>
+      </section>
+
+      <section class="product-cta" aria-label="3HK Hub 产品说明入口">
+        <div>
+          <span class="card-kicker">Product System</span>
+          <h2>查看完整 Hub 产品说明</h2>
+          <p>产品工作流、适用场景、生产边界和运营指标已整理为独立说明。</p>
+        </div>
+        <button id="openProductGuideButton" class="primary" type="button">查看完整产品说明</button>
       </section>
     </div>
 
@@ -246,24 +265,222 @@
       <button id="analyzeOpportunityButton" type="button">分析项目机会</button>
     </div>
 
+    <div id="productGuideModal" class="product-modal" hidden>
+      <div class="product-dialog" role="dialog" aria-modal="true" aria-labelledby="productGuideTitle">
+        <div class="product-dialog-head">
+          <div>
+            <span>Product System</span>
+            <h2 id="productGuideTitle">从线索录入到机会推进的完整 Hub 产品</h2>
+          </div>
+          <button id="closeProductGuideButton" class="icon-button" type="button" title="关闭">×</button>
+        </div>
+        <section class="product-zone product-zone-modal" aria-label="3HK Hub 产品说明">
+          <div class="product-head">
+            <p>
+              3HK Hub 不是单次撮合工具，而是一套面向跨境资本、产业合作和顾问网络的机会操作系统：
+              把企业画像、顾问资源、机会边、AI 证据和跟进记录放在同一张可计算网络里持续运营。
+            </p>
+          </div>
+
+          <div class="product-flow" aria-label="核心工作流">
+            <article>
+              <span>01</span>
+              <h3>Capture Signal</h3>
+              <p>通过文字、语音、Excel 或 JSON 录入企业线索，自动抽取地区、行业、收入规模、需求和资源标签。</p>
+            </article>
+            <article>
+              <span>02</span>
+              <h3>Build Network</h3>
+              <p>把公司、顾问和机会池转化为节点与边，实时计算 Degree、Bridge Score、Hub Score 和期望值排名。</p>
+            </article>
+            <article>
+              <span>03</span>
+              <h3>Rank Opportunity</h3>
+              <p>规则引擎先筛选候选机会，再由后端 AI 代理补充证据、风险因素、下一步动作和推荐顾问。</p>
+            </article>
+            <article>
+              <span>04</span>
+              <h3>Operate Deal</h3>
+              <p>用机会详情、跟进记录、报告下载和审计日志把高价值连接推进为可追踪、可复盘的项目动作。</p>
+            </article>
+          </div>
+
+          <div class="product-grid">
+            <article class="product-card product-card-wide">
+              <div>
+                <span class="card-kicker">Operating Model</span>
+                <h3>谁适合使用 3HK Hub</h3>
+              </div>
+              <div class="use-case-grid">
+                <div>
+                  <strong>FA / 顾问团队</strong>
+                  <p>沉淀企业线索、顾问关系和推进记录，统一判断哪些机会值得优先投入时间。</p>
+                </div>
+                <div>
+                  <strong>产业平台</strong>
+                  <p>把供应链、客户、资本和技术资源转成可搜索的网络资产，识别跨区域协同路径。</p>
+                </div>
+                <div>
+                  <strong>投资与资本市场团队</strong>
+                  <p>围绕融资、并购、香港上市和出海场景，建立可解释的机会排序与顾问推荐机制。</p>
+                </div>
+              </div>
+            </article>
+
+            <article class="product-card">
+              <span class="card-kicker">Core Modules</span>
+              <h3>产品模块</h3>
+              <ul class="feature-list">
+                <li>机会图谱：地图落点、节点拖拽、连线筛选、Hub 排名。</li>
+                <li>数据管理：公司库、顾问库、机会池、Excel/JSON 导入导出。</li>
+                <li>AI 分析：候选机会重排、证据补全、风险提示和项目报告。</li>
+                <li>后台配置：规则权重、模型代理、提示词和生产部署参数。</li>
+              </ul>
+            </article>
+
+            <article class="product-card">
+              <span class="card-kicker">Production Boundary</span>
+              <h3>生产能力边界</h3>
+              <ul class="feature-list">
+                <li>Cloudflare Pages 托管前端，生产域名为 hub.3hk.xyz。</li>
+                <li>D1 持久化公司、顾问、机会、报告、规则配置和审计日志。</li>
+                <li>Cloudflare Access 管理员身份，访客只读。</li>
+                <li>模型密钥只保存在后端 Secret，前端不保存 API Key。</li>
+              </ul>
+            </article>
+
+            <article class="product-card product-card-wide">
+              <div>
+                <span class="card-kicker">Data Contract</span>
+                <h3>数据如何在系统里流动</h3>
+              </div>
+              <div class="data-contract">
+                <div>
+                  <strong>输入</strong>
+                  <p>企业名称、地区、行业、主营业务、收入、需求、资源、顾问能力、覆盖区域和历史案例。</p>
+                </div>
+                <div>
+                  <strong>计算</strong>
+                  <p>需求资源匹配、行业亲和、跨境桥接、规模承接、顾问影响力、Hub Score 和机会期望值。</p>
+                </div>
+                <div>
+                  <strong>输出</strong>
+                  <p>高价值机会列表、推荐顾问、风险因素、下一步动作、Word 报告、Excel 数据和审计记录。</p>
+                </div>
+              </div>
+            </article>
+
+            <article class="product-card product-card-wide">
+              <div>
+                <span class="card-kicker">Operating Cadence</span>
+                <h3>团队每天如何把 Hub 跑起来</h3>
+              </div>
+              <div class="ops-matrix">
+                <div>
+                  <strong>晨间筛选</strong>
+                  <p>查看 Top Hub 机会、异常下降的可信边和新进入的跨境信号，确认今日优先推进队列。</p>
+                  <small>输出：优先级、负责人、下一步动作</small>
+                </div>
+                <div>
+                  <strong>顾问分派</strong>
+                  <p>根据覆盖区域、行业经验和桥接分数推荐顾问，把关键节点连接到最短可执行路径。</p>
+                  <small>输出：推荐顾问、连接理由、沟通备注</small>
+                </div>
+                <div>
+                  <strong>机会推进</strong>
+                  <p>围绕证据、风险、预计价值和成交概率持续更新机会边，让评分随真实业务进展变化。</p>
+                  <small>输出：机会状态、风险项、阶段结论</small>
+                </div>
+                <div>
+                  <strong>复盘沉淀</strong>
+                  <p>把报告、导出数据和审计日志保留下来，形成可追溯的机会资产与顾问贡献记录。</p>
+                  <small>输出：项目报告、审计记录、规则调优建议</small>
+                </div>
+              </div>
+            </article>
+
+            <article class="product-card">
+              <span class="card-kicker">Success Metrics</span>
+              <h3>需要持续观察的指标</h3>
+              <ul class="feature-list">
+                <li>Hub 覆盖率：高价值公司是否有足够顾问和机会边覆盖。</li>
+                <li>Bridge 转化率：跨区域桥接路径从推荐到真实沟通的比例。</li>
+                <li>Trust Edge 健康度：证据、跟进记录和顾问贡献是否完整。</li>
+                <li>Expected Pipeline：按期望值排序后的可推进项目储备。</li>
+              </ul>
+            </article>
+
+            <article class="product-card">
+              <span class="card-kicker">Rollout Path</span>
+              <h3>从演示到生产的落地顺序</h3>
+              <ul class="feature-list">
+                <li>导入历史公司、顾问和机会数据，统一字段与金额口径。</li>
+                <li>配置行业、地区、规模和顾问影响力权重，校准 Hub Score。</li>
+                <li>接入 Cloudflare Access、D1 和后端模型代理，完成生产权限闭环。</li>
+                <li>用每周复盘持续优化规则、提示词、顾问覆盖和机会阶段定义。</li>
+              </ul>
+            </article>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div id="visitorModal" class="login-modal" hidden>
+      <form id="visitorForm" class="login-dialog visitor-dialog" role="dialog" aria-modal="true" aria-labelledby="visitorTitle">
+        <div class="login-head">
+          <h2 id="visitorTitle">访客邮箱注册</h2>
+          <button id="closeVisitorButton" class="icon-button" type="button" title="关闭">×</button>
+        </div>
+        <p class="admin-note">注册成功后会自动以只读访客身份登录，可浏览图谱、筛选机会和查看产品说明。</p>
+        <label>
+          <span>邮箱</span>
+          <input id="visitorEmail" type="email" autocomplete="email" placeholder="name@example.com" required />
+        </label>
+        <label>
+          <span>姓名 / 称呼</span>
+          <input id="visitorName" autocomplete="name" placeholder="例如：王先生" />
+        </label>
+        <label>
+          <span>机构 / 公司</span>
+          <input id="visitorOrganization" autocomplete="organization" placeholder="例如：3HK Capital" />
+        </label>
+        <label>
+          <span>关注方向</span>
+          <select id="visitorInterest">
+            <option value="">暂不选择</option>
+            <option value="跨境资本">跨境资本</option>
+            <option value="产业合作">产业合作</option>
+            <option value="顾问网络">顾问网络</option>
+            <option value="AI机会图谱">AI机会图谱</option>
+          </select>
+        </label>
+        <div id="visitorError" class="login-error"></div>
+        <div class="login-actions">
+          <button type="button" id="cancelVisitorButton">取消</button>
+          <button class="primary" type="submit">完成注册</button>
+        </div>
+      </form>
+    </div>
+
     <div id="loginModal" class="login-modal" hidden>
       <form id="loginForm" class="login-dialog" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
         <div class="login-head">
           <h2 id="loginTitle">管理员登录</h2>
           <button id="closeLoginButton" class="icon-button" type="button" title="关闭">×</button>
         </div>
-        <label>
+        <p class="admin-note">管理员身份由 Cloudflare Access 提供。请在 Cloudflare Pages 中为后台和写入 API 配置 Access 策略。</p>
+        <label hidden>
           <span>用户名</span>
-          <input id="adminUsername" autocomplete="username" required />
+          <input id="adminUsername" autocomplete="username" />
         </label>
-        <label>
+        <label hidden>
           <span>密码</span>
-          <input id="adminPassword" type="password" autocomplete="current-password" required />
+          <input id="adminPassword" type="password" autocomplete="current-password" />
         </label>
         <div id="loginError" class="login-error"></div>
         <div class="login-actions">
           <button type="button" id="cancelLoginButton">取消</button>
-          <button class="primary" type="submit">登录</button>
+          <button class="primary" type="submit">重新检查 Access 身份</button>
         </div>
       </form>
     </div>
@@ -286,6 +503,6 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
-    <script src="./app.js" defer></script>
+    <script type="module" src="/src/app.js"></script>
   </body>
 </html>
