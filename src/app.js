@@ -1,5 +1,7 @@
+import { createBusinessCardScanner } from "./business-card.js";
 import {
   getSession,
+  requestJson,
   loadConfig as fetchRemoteConfig,
   loadDataset,
   registerVisitor,
@@ -291,6 +293,7 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
     parseButton: document.getElementById("parseButton"),
     sampleButton: document.getElementById("sampleButton"),
     voiceButton: document.getElementById("voiceButton"),
+    scanBusinessCardButton: document.getElementById("scanBusinessCardButton"),
     aiResult: document.getElementById("aiResult"),
     dataTable: document.getElementById("dataTable"),
     tableSummary: document.getElementById("tableSummary"),
@@ -399,6 +402,13 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
     needsRedraw: true,
     simulationActive: true,
   };
+
+  const CONTACT_FIELDS = ["phone", "email", "website", "address", "cardNotes"];
+  const businessCardScanner = createBusinessCardScanner({
+    canEdit: requireAdmin,
+    findDuplicate: findBusinessCardDuplicate,
+    onSave: saveBusinessCard,
+  });
 
   init();
 
@@ -978,6 +988,7 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
       els.aiInput.value = next;
     });
     els.voiceButton.addEventListener("click", startVoiceInput);
+    els.scanBusinessCardButton.addEventListener("click", businessCardScanner.open);
     els.addCompanyButton.addEventListener("click", () => openCompanyEditor());
     els.addAdvisorButton.addEventListener("click", () => openAdvisorEditor());
     els.importButton.addEventListener("click", () => els.importFile.click());
@@ -1064,6 +1075,7 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
 
   function setAccessRole(role) {
     state.accessRole = role === "admin" && state.session.admin ? "admin" : "viewer";
+    if (state.accessRole !== "admin") businessCardScanner.close();
     if (!isAdmin() && window.location.hash.replace("#", "") === "admin") {
       window.location.hash = "";
     }
@@ -2340,6 +2352,7 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
       </div>
       <div class="tag-list">${company.needs.map((tag) => `<span class="tag">需求：${escapeHtml(tag)}</span>`).join("")}</div>
       <div class="tag-list">${company.resources.map((tag) => `<span class="tag">资源：${escapeHtml(tag)}</span>`).join("")}</div>
+      ${contactDetailHtml(company, true)}
     `;
   }
 
@@ -2362,6 +2375,7 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
       </div>
       <div class="tag-list">${advisor.capabilities.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>
       <div class="tag-list">${advisor.industries.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>
+      ${contactDetailHtml(advisor, false)}
     `;
   }
 
@@ -2441,6 +2455,10 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
           <td>${formatNumber(company.hubScore || 0)}</td>
           <td>${formatNumber(company.degree || 0)}</td>
           <td>${formatNumber(company.bridgeScore || 0)}</td>
+          <td>${escapeHtml(isAdmin() ? company.contactName || "" : "**")}</td>
+          <td>${escapeHtml(isAdmin() ? company.contactTitle || "" : "**")}</td>
+          <td>${escapeHtml(isAdmin() ? company.phone || "" : "**")}</td>
+          <td>${escapeHtml(isAdmin() ? company.email || "" : "**")}</td>
           ${
             isAdmin()
               ? `<td class="row-actions">
@@ -2454,7 +2472,7 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
       .join("");
     els.dataTable.innerHTML = `
       <thead><tr>
-        <th>公司名称</th><th>地区</th><th>城市</th><th>行业</th><th>主营业务</th><th>收入规模（亿人民币）</th><th>痛点/需求</th><th>资源</th><th>可信度</th><th>Hub Score</th><th>Degree</th><th>Bridge</th>${actionHeader}
+        <th>公司名称</th><th>地区</th><th>城市</th><th>行业</th><th>主营业务</th><th>收入规模（亿人民币）</th><th>痛点/需求</th><th>资源</th><th>可信度</th><th>Hub Score</th><th>Degree</th><th>Bridge</th><th>联系人</th><th>联系人职务</th><th>电话</th><th>邮箱</th>${actionHeader}
       </tr></thead>
       <tbody>${rows}</tbody>`;
     bindTableActions();
@@ -2477,6 +2495,8 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
           <td>${formatNumber(advisor.hubScore || 0)}</td>
           <td>${formatNumber(advisor.degree || 0)}</td>
           <td>${formatNumber(advisor.bridgeScore || 0)}</td>
+          <td>${escapeHtml(isAdmin() ? advisor.phone || "" : "**")}</td>
+          <td>${escapeHtml(isAdmin() ? advisor.email || "" : "**")}</td>
           ${
             isAdmin()
               ? `<td class="row-actions">
@@ -2490,7 +2510,7 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
       .join("");
     els.dataTable.innerHTML = `
       <thead><tr>
-        <th>姓名</th><th>头衔</th><th>任职单位</th><th>地区</th><th>关键能力</th><th>覆盖行业</th><th>覆盖区域</th><th>关系强度</th><th>Hub Score</th><th>Degree</th><th>Bridge</th>${actionHeader}
+        <th>姓名</th><th>头衔</th><th>任职单位</th><th>地区</th><th>关键能力</th><th>覆盖行业</th><th>覆盖区域</th><th>关系强度</th><th>Hub Score</th><th>Degree</th><th>Bridge</th><th>电话</th><th>邮箱</th>${actionHeader}
       </tr></thead>
       <tbody>${rows}</tbody>`;
     bindTableActions();
@@ -2521,6 +2541,9 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
       <label><span>年收入（亿人民币）</span><input name="revenue" required value="${escapeAttr(company ? toYi(company.revenue) : "")}" placeholder="8 或 8亿" /></label>
       <label><span>员工数</span><input name="employeeCount" value="${escapeAttr(company ? String(company.employeeCount) : "")}" /></label>
       <label><span>阶段</span><input name="companyStage" value="${escapeAttr(company?.companyStage ?? "扩张期")}" /></label>
+      <label><span>联系人</span><input name="contactName" value="${escapeAttr(company?.contactName ?? "")}" /></label>
+      <label><span>联系人职务</span><input name="contactTitle" value="${escapeAttr(company?.contactTitle ?? "")}" /></label>
+      ${contactEditorHtml(company)}
       <label><span>需求/痛点</span><textarea name="needs" rows="3">${escapeHtml((company?.needs ?? []).join("、"))}</textarea></label>
       <label><span>资源能力</span><textarea name="resources" rows="3">${escapeHtml((company?.resources ?? []).join("、"))}</textarea></label>
       <label><span>可信度</span><input name="confidenceScore" value="${escapeAttr(company ? String(company.confidenceScore) : "85")}" /></label>
@@ -2542,6 +2565,8 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
       <label><span>头衔</span><input name="title" value="${escapeAttr(advisor?.title ?? "")}" /></label>
       <label><span>任职单位</span><input name="organization" value="${escapeAttr(advisor?.organization ?? "")}" /></label>
       <label><span>国家/地区</span><input name="countryRegion" value="${escapeAttr(advisor?.countryRegion ?? "中国大陆")}" /></label>
+      <label><span>城市</span><input name="city" value="${escapeAttr(advisor?.city ?? "")}" /></label>
+      ${contactEditorHtml(advisor)}
       <label><span>关键能力</span><textarea name="capabilities" rows="3">${escapeHtml((advisor?.capabilities ?? []).join("、"))}</textarea></label>
       <label><span>覆盖行业</span><textarea name="industries" rows="3">${escapeHtml((advisor?.industries ?? []).join("、"))}</textarea></label>
       <label><span>覆盖区域</span><textarea name="regions" rows="3">${escapeHtml((advisor?.regions ?? []).join("、"))}</textarea></label>
@@ -2558,11 +2583,16 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
 
   function saveCompanyFromEditor(event) {
     event.preventDefault();
+    if (!requireAdmin()) return;
     const data = Object.fromEntries(new FormData(els.editForm).entries());
     const company = {
+      ...state.companies.find((item) => item.id === state.editing.id),
+      ...contactFieldsFromData(data),
       id: state.editing.id ?? nextId("c", state.companies),
       type: "company",
       name: data.name.trim(),
+      contactName: data.contactName.trim(),
+      contactTitle: data.contactTitle.trim(),
       countryRegion: data.countryRegion.trim(),
       city: normalizeCompanyCity(data.city),
       industry: data.industry.trim(),
@@ -2586,11 +2616,15 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
 
   function saveAdvisorFromEditor(event) {
     event.preventDefault();
+    if (!requireAdmin()) return;
     const data = Object.fromEntries(new FormData(els.editForm).entries());
     const advisor = {
+      ...state.advisors.find((item) => item.id === state.editing.id),
+      ...contactFieldsFromData(data),
       id: state.editing.id ?? nextId("a", state.advisors),
       type: "advisor",
       name: data.name.trim(),
+      city: normalizeCompanyCity(data.city),
       title: data.title.trim(),
       organization: data.organization.trim(),
       countryRegion: data.countryRegion.trim(),
@@ -2609,6 +2643,86 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
     state.editing = null;
     els.editModal.hidden = true;
     els.editForm.innerHTML = "";
+  }
+
+  function contactFieldsFromData(data) {
+    return Object.fromEntries(CONTACT_FIELDS.map((field) => [field, String(data[field] || "").trim()]));
+  }
+
+  function contactEditorHtml(record) {
+    return `
+      <label><span>电话</span><input name="phone" type="tel" value="${escapeAttr(record?.phone || "")}" /></label>
+      <label><span>邮箱</span><input name="email" value="${escapeAttr(record?.email || "")}" /></label>
+      <label><span>网址</span><input name="website" value="${escapeAttr(record?.website || "")}" /></label>
+      <label><span>地址</span><input name="address" value="${escapeAttr(record?.address || "")}" /></label>
+      <label><span>名片原文 / 备注</span><textarea name="cardNotes" rows="3">${escapeHtml(record?.cardNotes || "")}</textarea></label>`;
+  }
+
+  function contactDetailHtml(record, company) {
+    const fields = company ? [["联系人", record.contactName], ["联系人职务", record.contactTitle]] : [["城市", record.city]];
+    fields.push(["电话", record.phone], ["邮箱", record.email], ["网址", record.website], ["地址", record.address], ["名片原文 / 备注", record.cardNotes]);
+    return `<div class="kv contact-details">${fields.filter(([, value]) => value).map(([label, value]) => `<span>${label}</span><strong>${escapeHtml(isAdmin() ? value : "**")}</strong>`).join("")}</div>`;
+  }
+
+  function findBusinessCardDuplicate(draft) {
+    const key = (value) => String(value || "").normalize("NFKC").replace(/\s+/g, "").toLowerCase();
+    if (draft.recordType === "company") {
+      return draft.companyName?.trim() ? state.companies.find((company) => key(company.name) === key(draft.companyName)) : null;
+    }
+    return draft.contactName?.trim() ? state.advisors.find((advisor) => key(advisor.name) === key(draft.contactName) && key(advisor.organization) === key(draft.companyName)) : null;
+  }
+
+  async function saveBusinessCard(draft) {
+    if (!requireAdmin()) throw new Error("管理员登录后可录入名片。");
+    const company = draft.recordType === "company";
+    const existing = findBusinessCardDuplicate(draft);
+    if (existing && !draft.confirmUpdate) throw new Error("请先确认更新已有记录。");
+    const list = company ? state.companies : state.advisors;
+    const record = existing ? { ...existing } : company ? {
+      id: `c-${crypto.randomUUID()}`, type: "company", name: draft.companyName,
+      countryRegion: draft.countryRegion || "未填写", city: normalizeCompanyCity(draft.city),
+      industry: draft.industry || "未分类", mainBusiness: draft.mainBusiness,
+      revenue: 0, employeeCount: 0, companyStage: "待补充",
+      needs: [], resources: [], painPoints: [], confidenceScore: 60,
+      createdAt: new Date().toISOString().slice(0, 10), source: "名片扫描", isNew: true,
+    } : {
+      id: `a-${crypto.randomUUID()}`, type: "advisor", name: draft.contactName,
+      title: draft.contactTitle, organization: draft.companyName,
+      countryRegion: draft.countryRegion || "未填写", city: normalizeCompanyCity(draft.city),
+      capabilities: [], industries: draft.industry ? [draft.industry] : [],
+      regions: draft.countryRegion ? [draft.countryRegion] : [],
+      relationshipStrength: 70, cases: [], source: "名片扫描",
+    };
+    for (const field of CONTACT_FIELDS) if (draft[field]) record[field] = draft[field];
+    if (company) {
+      if (draft.contactName) record.contactName = draft.contactName;
+      if (draft.contactTitle) record.contactTitle = draft.contactTitle;
+      for (const field of ["industry", "mainBusiness"]) if (!record[field] || record[field] === "未分类") record[field] = draft[field] || record[field];
+      record.radius = graphNodeRadius(record);
+    } else if (draft.contactTitle) record.title = draft.contactTitle;
+    if (existing) {
+      if ((!record.countryRegion || record.countryRegion === "未填写") && draft.countryRegion) record.countryRegion = draft.countryRegion;
+      if (!record.city && draft.city) record.city = normalizeCompanyCity(draft.city);
+    }
+    const updated = list.slice();
+    upsertById(updated, record);
+    const companies = company ? updated : state.companies;
+    const advisors = company ? state.advisors : updated;
+    await requestJson(`/api/${company ? "companies" : "advisors"}${existing ? `/${encodeURIComponent(record.id)}` : ""}`, {
+      method: existing ? "PUT" : "POST", body: JSON.stringify(record),
+    });
+    state.companies = companies;
+    state.advisors = advisors;
+    // A business card has no verified revenue or needs; preserve the opportunity pool.
+    normalizeData();
+    state.advisorLinks = generateAdvisorLinks(state.companies, state.advisors);
+    rebuildGraph();
+    seedPositions();
+    state.activeTab = company ? "companies" : "advisors";
+    document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === state.activeTab));
+    renderAll();
+    renderDetail(state.nodeById.get(record.id));
+    flashTableSummary(`名片已${existing ? "更新" : "录入"}：${record.name}；可编辑补充业务资料后重新匹配`);
   }
 
   function deleteCompany(id) {
@@ -3348,6 +3462,9 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
       id: String(rowValue(row, ["id", "公司ID", "companyId"]) || `c${index + 1}`),
       type: "company",
       name: String(rowValue(row, ["公司名称", "公司", "企业名称", "项目名称", "name"])).trim(),
+      contactName: String(rowValue(row, ["联系人", "contactName"]) || "").trim(),
+      contactTitle: String(rowValue(row, ["联系人职务", "contactTitle"]) || "").trim(),
+      ...contactFieldsFromExcel(row),
       countryRegion: String(rowValue(row, ["地区", "国家地区", "国家/地区", "countryRegion", "region"]) || "中国大陆").trim(),
       city: normalizeCompanyCity(rowValue(row, ["城市", "所在城市", "city"])),
       industry: String(rowValue(row, ["行业", "industry"]) || "新能源").trim(),
@@ -3374,6 +3491,8 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
       name: String(rowValue(row, ["姓名", "顾问姓名", "name"])).trim(),
       title: String(rowValue(row, ["头衔", "title"]) || "").trim(),
       organization: String(rowValue(row, ["任职单位", "机构", "organization"]) || "").trim(),
+      city: normalizeCompanyCity(rowValue(row, ["城市", "city"])),
+      ...contactFieldsFromExcel(row),
       countryRegion: String(rowValue(row, ["地区", "国家地区", "countryRegion", "region"]) || "中国大陆").trim(),
       capabilities: arrayFromValue(rowValue(row, ["关键能力", "能力", "capabilities"])),
       industries: arrayFromValue(rowValue(row, ["覆盖行业", "industries"])),
@@ -3431,6 +3550,9 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
   function companyToExcelRow(company) {
     return {
       公司名称: company.name,
+      联系人: company.contactName || "",
+      联系人职务: company.contactTitle || "",
+      ...contactFieldsToExcel(company),
       地区: company.countryRegion,
       城市: company.city || "",
       行业: company.industry,
@@ -3450,6 +3572,8 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
       姓名: advisor.name,
       头衔: advisor.title,
       任职单位: advisor.organization,
+      城市: advisor.city || "",
+      ...contactFieldsToExcel(advisor),
       地区: advisor.countryRegion,
       关键能力: arrayFromValue(advisor.capabilities).join("、"),
       覆盖行业: arrayFromValue(advisor.industries).join("、"),
@@ -3457,6 +3581,20 @@ import { escapeAttr as safeAttr, escapeHtml as safeHtml } from "./security/html.
       关系强度: advisor.relationshipStrength,
       案例: arrayFromValue(advisor.cases).join("、"),
     };
+  }
+
+  function contactFieldsFromExcel(row) {
+    return Object.fromEntries([
+      ["phone", ["电话", "联系电话", "手机", "phone"]],
+      ["email", ["邮箱", "电子邮件", "email"]],
+      ["website", ["网址", "网站", "website"]],
+      ["address", ["地址", "address"]],
+      ["cardNotes", ["名片原文/备注", "名片原文", "cardNotes"]],
+    ].map(([field, aliases]) => [field, String(rowValue(row, aliases) || "").trim()]));
+  }
+
+  function contactFieldsToExcel(record) {
+    return { 电话: record.phone || "", 邮箱: record.email || "", 网址: record.website || "", 地址: record.address || "", "名片原文/备注": record.cardNotes || "" };
   }
 
   function opportunityToExcelRow(opportunity) {

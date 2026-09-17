@@ -1,4 +1,4 @@
-import { checkRateLimit, errorResponse, handleOptions, json, parseStored, requireDb } from "./_shared.js";
+import { checkRateLimit, errorResponse, handleOptions, json, parseStored, readableRecord, requireDb } from "./_shared.js";
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -16,8 +16,8 @@ export async function onRequest(context) {
     ]);
     return json(request, {
       exportedAt: new Date().toISOString(),
-      companies: companies.results.map(parseStored),
-      advisors: advisors.results.map(parseStored),
+      companies: companies.results.map((row) => readableRecord(request, env, parseStored(row), "company")),
+      advisors: advisors.results.map((row) => readableRecord(request, env, parseStored(row), "advisor")),
       opportunities: opportunities.results.map(parseStored),
       config: parseStored(config),
     });

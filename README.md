@@ -125,6 +125,7 @@ Visitor email registration is read-only and does not grant admin rights. Admin w
 - `GET /api/export`
 - `GET/PUT /api/config`
 - `POST /api/analyze-opportunities`
+- `POST /api/scan-business-card` (admin only)
 - `POST /api/reports`
 - `GET /api/reports`
 
@@ -161,5 +162,15 @@ The test suite covers:
 - Browser smoke test for graph rendering, product guide modal, and visitor registration flow.
 
 ## Deployment Notes
+
+### 名片扫描录入
+
+管理员进入“Hub Signal 录入”，点击“名片扫描”，拍摄或上传 JPG、PNG、WebP 图片（单张不超过 10 MB）。点击“识别名片”提取姓名、职务、机构、电话、邮箱、网址、地址和原文，核对修改后录入公司或顾问数据库。公司需填写公司名称，顾问需填写姓名。自动识别需要后端 `OPENAI_API_KEY`；可选 `OPENAI_VISION_MODEL` 未设置时沿用 `OPENAI_MODEL`，默认 `gpt-4.1-mini`。模型服务需支持 [图片输入](https://developers.openai.com/api/docs/guides/images-vision)。
+
+图片先在浏览器缩放压缩，点击识别后发送给 AI 服务；数据库只保存核对后的字段。录入通过已有管理员认证和公司 / 顾问写入 API 保存到 D1。识别失败可手动填写；写入失败会保留表单供重试。重复公司名称，或重复顾问姓名与机构时，需确认后更新非空的名片字段。每条公司记录维护一位主要联系人，访客界面隐藏名片联系方式。
+
+名片字段可在数据库编辑和节点详情查看，并随 Excel / JSON 导入导出。扫描时保留现有机会池；未提供的收入、需求和资源保持空缺，可在编辑时补充并重新匹配。
+
+验证命令：`npm run test:cards`、`npm run test:cards:browser`（本机 Chrome 或指定 `CHROME_PATH`）。浏览器验证使用本地测试服务，不会调用外部 AI。
 
 The repo prepares `hub.3hk.xyz`, security headers, Cloudflare Functions, and D1 schema. The final custom-domain binding still needs to be completed in the Cloudflare dashboard or through the account-level API.

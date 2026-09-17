@@ -162,6 +162,13 @@ export function parseStored(row) {
   return row ? JSON.parse(row.payload) : null;
 }
 
+export function readableRecord(request, env, payload, type) {
+  if (!payload || !["company", "advisor"].includes(type) || getAccessIdentity(request, env).admin) return payload;
+  const visible = { ...payload };
+  for (const field of ["contactName", "contactTitle", "phone", "email", "website", "address", "cardNotes"]) delete visible[field];
+  return visible;
+}
+
 export class HttpError extends Error {
   constructor(status, message) {
     super(message);

@@ -7,6 +7,7 @@ import {
   methodNotAllowed,
   parseStored,
   readJsonBody,
+  readableRecord,
   requireAdmin,
   requireDb,
   validateRecordPayload,
@@ -27,7 +28,7 @@ export async function collectionRequest(context, type) {
     const table = TABLES[type];
     if (request.method === "GET") {
       const rows = await db.prepare(`SELECT payload FROM ${table} ORDER BY updated_at DESC`).all();
-      return json(request, { items: rows.results.map(parseStored) });
+      return json(request, { items: rows.results.map((row) => readableRecord(request, env, parseStored(row), type)) });
     }
     if (request.method === "POST") {
       const identity = requireAdmin(request, env);
@@ -54,7 +55,7 @@ export async function itemRequest(context, type) {
 
     if (request.method === "GET") {
       const row = await db.prepare(`SELECT payload FROM ${table} WHERE id = ?`).bind(id).first();
-      const payload = parseStored(row);
+      const payload = readableRecord(request, env, parseStored(row), type);
       return payload ? json(request, payload) : json(request, { error: "Not found" }, 404);
     }
 

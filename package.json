@@ -8,6 +8,8 @@
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
+    "test:cards": "node --test tests/scan-business-card.test.mjs",
+    "test:cards:browser": "node tests/business-card.browser.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {

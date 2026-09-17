@@ -130,6 +130,7 @@
               <span>录入新线索后识别 Hub 节点与桥接机会</span>
             </div>
             <div class="entry-actions">
+              <button id="scanBusinessCardButton" type="button">名片扫描</button>
               <button id="voiceButton" type="button">语音</button>
               <button id="sampleButton" type="button">换个样例</button>
               <button id="parseButton" class="primary" type="button">解析并匹配</button>
@@ -250,6 +251,51 @@
         <button id="openProductGuideButton" class="primary" type="button">查看完整产品说明</button>
       </section>
     </div>
+
+    <dialog id="businessCardDialog" class="business-card-dialog" aria-labelledby="businessCardTitle">
+      <div class="edit-head">
+        <h2 id="businessCardTitle">名片扫描录入</h2>
+        <button id="closeBusinessCardButton" class="icon-button" type="button" aria-label="关闭名片扫描">×</button>
+      </div>
+      <div class="business-card-body">
+        <div class="business-card-upload">
+          <div class="business-card-actions">
+            <button id="captureBusinessCardButton" type="button">拍摄名片</button>
+            <button id="uploadBusinessCardButton" type="button">上传图片</button>
+            <button id="recognizeBusinessCardButton" class="primary" type="button" disabled>识别名片</button>
+          </div>
+          <input id="businessCardFile" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" hidden />
+          <input id="businessCardCamera" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" hidden />
+          <p class="business-card-hint">支持 JPG、PNG、WebP，单张不超过 10 MB。请拍清文字并避开反光。</p>
+          <img id="businessCardPreview" class="business-card-preview" alt="待识别的名片" hidden />
+          <p class="business-card-hint">点击识别后，图片会交给 AI 提取文字。请核对结果后确认录入，也可直接手动填写。</p>
+          <div id="businessCardStatus" class="business-card-status" role="status" aria-live="polite"></div>
+        </div>
+        <form id="businessCardForm" class="business-card-form">
+          <label class="business-card-wide"><span>录入到</span><select name="recordType"><option value="company">公司数据库</option><option value="advisor">顾问数据库</option></select></label>
+          <label><span>姓名</span><input name="contactName" maxlength="200" autocomplete="name" /></label>
+          <label><span>职务</span><input name="contactTitle" maxlength="200" autocomplete="organization-title" /></label>
+          <label class="business-card-wide"><span>公司 / 机构名称</span><input name="companyName" maxlength="300" autocomplete="organization" required /></label>
+          <label><span>电话</span><input name="phone" type="tel" maxlength="300" autocomplete="tel" /></label>
+          <label><span>邮箱</span><input name="email" maxlength="300" autocomplete="email" placeholder="多个邮箱可用逗号分隔" /></label>
+          <label><span>网址</span><input name="website" maxlength="500" autocomplete="url" /></label>
+          <label><span>国家 / 地区</span><input name="countryRegion" maxlength="100" /></label>
+          <label><span>城市</span><input name="city" maxlength="100" /></label>
+          <label><span>行业（选填）</span><input name="industry" maxlength="100" /></label>
+          <label class="business-card-wide"><span>地址</span><input name="address" maxlength="1000" autocomplete="street-address" /></label>
+          <label class="business-card-wide"><span>主营业务（选填）</span><input name="mainBusiness" maxlength="1000" /></label>
+          <label class="business-card-wide"><span>识别原文 / 备注</span><textarea name="cardNotes" rows="4" maxlength="6000"></textarea></label>
+          <div id="businessCardDuplicate" class="business-card-wide business-card-duplicate" hidden>
+            <p id="businessCardDuplicateText"></p>
+            <label class="business-card-confirm"><input name="confirmUpdate" type="checkbox" />确认更新已有记录中已填写的名片字段</label>
+          </div>
+          <div class="business-card-wide edit-actions">
+            <button id="cancelBusinessCardButton" type="button">取消</button>
+            <button id="saveBusinessCardButton" class="primary" type="submit">确认录入</button>
+          </div>
+        </form>
+      </div>
+    </dialog>
 
     <div id="editModal" class="edit-modal" hidden>
       <div class="edit-dialog" role="dialog" aria-modal="true" aria-labelledby="editTitle">

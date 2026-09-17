@@ -1317,6 +1317,55 @@ tr:hover td {
   white-space: nowrap;
 }
 
+.business-card-dialog {
+  width: min(960px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #071425;
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.business-card-dialog::backdrop {
+  background: rgba(2, 8, 16, 0.78);
+  backdrop-filter: blur(8px);
+}
+
+.business-card-dialog .edit-head .icon-button { flex: 0 0 36px; width: 36px; height: 36px; }
+.business-card-dialog .edit-head h2 { flex: 1; }
+
+.business-card-body {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: 20px;
+  padding: 18px;
+}
+
+.business-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.business-card-hint { color: var(--muted); font-size: 12px; line-height: 1.7; }
+.business-card-preview { display: block; width: 100%; max-height: 360px; object-fit: contain; border: 1px solid var(--line); border-radius: 7px; }
+.business-card-status { font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; color: var(--accent-strong); }
+.business-card-status.is-error { color: #ffb4a9; }
+.business-card-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.business-card-form label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+.business-card-form input, .business-card-form select, .business-card-form textarea { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 7px; padding: 9px 10px; background: rgba(5, 15, 28, 0.92); color: var(--ink); }
+.business-card-wide { grid-column: 1 / -1; }
+.business-card-duplicate { padding: 12px; border: 1px solid rgba(255, 198, 109, 0.4); border-radius: 7px; color: #ffd092; font-size: 12px; line-height: 1.7; }
+.business-card-duplicate p { margin: 0 0 8px; }
+.business-card-form .business-card-confirm { display: flex; align-items: start; gap: 8px; color: #ffd092; }
+.business-card-form .business-card-confirm input { width: auto; margin-top: 4px; }
+.business-card-dialog button:disabled { opacity: 0.5; cursor: wait; }
+.contact-details strong { overflow-wrap: anywhere; white-space: pre-wrap; }
+
+@media (max-width: 680px) {
+  .business-card-body, .business-card-form { grid-template-columns: minmax(0, 1fr); }
+  .business-card-body { padding: 14px; }
+  .business-card-preview { max-height: 220px; }
+}
+
 .edit-modal {
   position: fixed;
   z-index: 20;
